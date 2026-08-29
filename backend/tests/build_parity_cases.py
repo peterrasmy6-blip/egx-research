@@ -15,6 +15,8 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import select
+
 from app.db import SessionLocal
 from app.engine import analytics as A
 from app.engine import scenario as S
@@ -210,6 +212,18 @@ def build() -> dict:
                        "total_contributed_real": r["total_contributed_real"]},
         })
     cases["monte_carlo"] = mc
+
+    # The searchable universe, exactly as the site serves it. The harness uses
+    # it to test the picker against real data rather than a fixture that could
+    # drift away from what visitors actually see.
+    from app.models import Security
+    cases["universe"] = [
+        {"ticker": s.ticker, "name": s.name_en, "name_ar": s.name_ar,
+         "sector": s.sector, "market_cap": s.market_cap,
+         "asset_type": s.asset_type}
+        for s in db.scalars(select(Security).where(
+            Security.listing_status == "listed",
+            Security.asset_type != "index"))]
 
     db.close()
     return cases

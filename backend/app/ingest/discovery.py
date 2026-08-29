@@ -16,9 +16,14 @@ Sources, in priority order:
      symbols resolve to a current price only, so they are used for
      verification and naming, never as the price/statement source.
 
-A ticker that either source knows about is kept. Coverage is then measured
-per company by `sync_universe`, which records what data actually exists rather
-than assuming.
+A ticker that either source knows about is a *candidate*. It is then filtered
+against the reference stock universe in `reference_universe.py`, because the
+raw merge of the two rosters is noticeably dirty: it carries tickers renamed
+years ago, companies that have left the exchange, and non-ordinary instruments
+such as rights issues and preferred shares. See that module for the rules.
+
+Coverage is then measured per company by `sync_universe`, which records what
+data actually exists rather than assuming.
 """
 from __future__ import annotations
 
@@ -239,6 +244,73 @@ AM_SECTOR_MAP = {
 }
 
 
+def apply_reference(index: dict[str, dict], verbose: bool = True) -> dict[str, dict]:
+    """
+    Reduce the raw two-roster merge to the reference stock universe.
+
+    Three things happen here, in order:
+
+      * a stale ticker is folded into the current one it renamed to, so its
+        history is not stranded under a name nobody searches for;
+      * anything the reference list classifies as a non-ordinary instrument
+        (rights, ETF, certificate, fund, second share class) is dropped from
+        the *stock* universe, with the reason kept for the coverage report;
+      * anything left that the reference list does not recognise is dropped.
+
+    The reference set is the floor, not the ceiling: a company in the reference
+    list that neither roster mentioned is still added, because the roster
+    missing it is a roster problem.
+    """
+    from .reference_universe import (EXCLUDED, KEEP_EXTRA,
+                                     NOTE_NOT_ON_REFERENCE, ORDINARY, RENAMES)
+
+    out: dict[str, dict] = {}
+    renamed = dropped_instrument = dropped_unknown = 0
+
+    for tk, rec in index.items():
+        target = RENAMES.get(tk, tk)
+        if target != tk:
+            renamed += 1
+
+        if target in EXCLUDED:
+            dropped_instrument += 1
+            continue
+        if target not in ORDINARY:
+            dropped_unknown += 1
+            continue
+
+        # A rename collapses two rows onto one; keep the richer record.
+        prev = out.get(target)
+        if prev is None or rec.get("sources", 1) > prev.get("sources", 1):
+            out[target] = dict(rec)
+        out[target]["sources"] = max(rec.get("sources", 1),
+                                     (prev or {}).get("sources", 1))
+
+    # Reference entries neither roster produced.
+    restored = 0
+    for tk, name in ORDINARY.items():
+        if tk not in out:
+            out[tk] = {"name": name, "sources": 1,
+                       "source_url": None, "sector_hint": None}
+            restored += 1
+
+    # The reference name is the authoritative one -- roster names are often
+    # abbreviated, misspelt, or a former trading name.
+    for tk, rec in out.items():
+        rec["name"] = ORDINARY[tk]
+        rec["on_reference_list"] = tk not in KEEP_EXTRA
+        if tk in KEEP_EXTRA:
+            rec["data_note"] = NOTE_NOT_ON_REFERENCE
+
+    if verbose:
+        print("  reference filter: %d ordinary stocks "
+              "(%d renamed, %d non-ordinary instruments removed, "
+              "%d unrecognised removed, %d restored from reference)"
+              % (len(out), renamed, dropped_instrument, dropped_unknown,
+                 restored))
+    return out
+
+
 def build_universe(verbose: bool = True, use_cache: bool = False) -> dict[str, dict]:
     """
     Merge both sources into the candidate universe.
@@ -251,7 +323,9 @@ def build_universe(verbose: bool = True, use_cache: bool = False) -> dict[str, d
         data = json.loads(cache.read_text(encoding="utf-8"))
         if verbose:
             print("  using cached universe: %d tickers" % len(data))
-        return data
+        # A cache written before the reference filter existed would otherwise
+        # reintroduce every ghost ticker. Filtering is idempotent.
+        return apply_reference(data, verbose)
 
     index: dict[str, dict] = {}
     errors: list[str] = []
@@ -259,19 +333,25 @@ def build_universe(verbose: bool = True, use_cache: bool = False) -> dict[str, d
     # Two independent rosters, merged. Either alone under-represents the
     # exchange; together they cover it.
     try:
-        index.update(fetch_ticker_index(verbose))
+        for tk, rec in fetch_ticker_index(verbose).items():
+            rec["sources"] = 1
+            index[tk] = rec
     except Exception as e:
         errors.append("stockanalysis: %s" % e)
 
     try:
         for tk, rec in fetch_african_markets(verbose).items():
             if tk in index:
-                # Keep the first source's name, add what the second knows.
+                # Listed by both rosters -- treat the listing as confirmed.
                 index[tk].setdefault("sector_hint", rec.get("sector_hint"))
+                index[tk]["sources"] = index[tk].get("sources", 1) + 1
             else:
+                # Only this roster knows it. Kept, but not counted as a
+                # confirmed current listing until something corroborates it.
                 index[tk] = {"name": rec["name"],
                              "source_url": rec["source_url"],
-                             "sector_hint": rec.get("sector_hint")}
+                             "sector_hint": rec.get("sector_hint"),
+                             "sources": 1}
     except Exception as e:
         errors.append("african-markets: %s" % e)
 
@@ -280,7 +360,8 @@ def build_universe(verbose: bool = True, use_cache: bool = False) -> dict[str, d
             if verbose:
                 print("  both rosters failed (%s); falling back to cache"
                       % "; ".join(errors))
-            return json.loads(cache.read_text(encoding="utf-8"))
+            return apply_reference(
+                json.loads(cache.read_text(encoding="utf-8")), verbose)
         raise RuntimeError("No roster source reachable: %s" % "; ".join(errors))
 
     if errors and verbose:
@@ -297,6 +378,8 @@ def build_universe(verbose: bool = True, use_cache: bool = False) -> dict[str, d
         nm = d["name"].lower()
         if nm:
             isin_names[nm] = d
+
+    index = apply_reference(index, verbose)
 
     for tk, rec in index.items():
         rec["yahoo_symbol"] = tk + ".CA"

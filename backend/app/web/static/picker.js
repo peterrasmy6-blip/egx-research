@@ -54,6 +54,10 @@ const Picker = (() => {
     }
     if (!best) return 0;
 
+    // A ticker we could not confirm as currently listed ranks below one we
+    // could, so a search for a real company never surfaces a dead one first.
+    if (item.listing_confirmed === false) best = Math.round(best * 0.35);
+
     // Size breaks ties so the obvious answer comes first.
     const cap = item.market_cap || 0;
     return best * 1e6 + Math.min(cap / 1e6, 9e5);

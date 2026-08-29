@@ -295,7 +295,9 @@ async function boot() {
   }
 
   document.getElementById("foot-status").textContent =
-    `${STATUS.securities_listed} listed securities · ` +
+    `${count(STATUS.companies_confirmed)} EGX companies with market data · ` +
+    `${count(STATUS.companies_unconfirmed)} tracked without · ` +
+    `${count(STATUS.funds)} funds · ` +
     `${nf(STATUS.price_rows)} daily prices · ${nf(STATUS.statement_facts)} statement figures · ` +
     `market data to ${STATUS.latest_market_date}. Sources: ${STATUS.sources.join("; ")}.`;
   document.getElementById("foot-disclaimer").textContent = STATUS.disclaimer;

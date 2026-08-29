@@ -113,6 +113,28 @@ def main() -> int:
         if bad:
             fail("non-positive prices: %s" % bad[:10])
 
+        # The published universe must contain companies and nothing else. A
+        # rights issue or a second share class leaking back in would put a
+        # non-business on the screener and double-count a real one.
+        sys.path.insert(0, os.path.join(ROOT, "backend"))
+        from app.ingest.reference_universe import EXCLUDED, ORDINARY
+        equities = {s["ticker"] for s in secs
+                    if s.get("asset_type", "equity") == "equity"}
+        leaked = sorted(equities & set(EXCLUDED))
+        if leaked:
+            fail("non-company instruments published as companies: %s"
+                 % leaked[:10])
+        missing = sorted(set(ORDINARY) - equities)
+        if missing:
+            fail("companies missing from the published universe: %s"
+                 % missing[:10])
+        stray = sorted(equities - set(ORDINARY))
+        if stray:
+            fail("companies published that are not in the reference "
+                 "universe: %s" % stray[:10])
+        print("  universe: %d companies, matches the reference list"
+              % len(equities))
+
     # ---- metrics sanity: the guards must still be holding ----
     met = load("metrics.json")
     if met:

@@ -58,8 +58,19 @@ function viewHome(view) {
 
     <div class="section-head">
       <h2>The exchange at a glance</h2>
-      <p>${count(STATUS.securities_listed)} listed securities · ${count(STATUS.securities_with_prices)} with price history ·
-         ${count(STATUS.securities_with_statements)} with financial statements · data to ${esc(STATUS.latest_market_date || "—")}</p>
+      <p>${count(STATUS.companies_confirmed)} companies with market data · ${count(STATUS.funds)} funds ·
+         ${count(STATUS.securities_with_prices)} with price history ·
+         ${count(STATUS.securities_with_statements)} with financial statements ·
+         data to ${esc(STATUS.latest_market_date || "—")}</p>
+      <p class="muted" style="font-size:13px;margin-top:6px">
+        Every company here is an ordinary listed share. Rights issues, the
+        EGX30 ETF, certificates and second share classes of the same company
+        are deliberately not counted as companies — they would double-count a
+        business or list something that is not one.
+        ${count(STATUS.companies_retired)} tickers that appeared in the raw
+        source rosters were retired: renamed years ago, no longer on the
+        exchange, or not a company at all. Where a company has no market data
+        it is still searchable and marked <em>No data</em>.</p>
     </div>
 
     <div class="grid-2">
@@ -237,7 +248,10 @@ function renderMarkets() {
           <td class="${cls(s.day_change_pct)}">${pct(s.day_change_pct)}</td>
           <td class="${cls(s.ret_1y)}" style="font-weight:600">${pct(s.ret_1y)}</td>
           <td>${s.asset_type === 'fund' ? (s.fund && s.fund.risk ? esc(s.fund.risk) : '—') : bigMoney(s.market_cap)}</td>
-          <td style="text-align:left">${qualityBadge(s.data_quality)}</td>
+          <td style="text-align:left">${qualityBadge(s.data_quality)}${
+            s.price == null
+              ? ' <span class="badge none" title="Listed, but no free source carries its prices">No data</span>'
+              : ""}</td>
         </tr>`).join("")}</tbody>
       </table></div>
     </div>`;
@@ -274,6 +288,14 @@ async function viewCompany(view, args) {
         <div class="t">as of ${esc(d.price_date || "—")}${q.is_stale ? " · not today's price" : ""}</div>
       </div>
     </div>
+
+    ${d.price == null ? `<div class="callout">
+      <strong>No market data available for this company.</strong>
+      It is a listed EGX company, but no free source carries its prices — so we
+      have no prices, no ratios and no valuation for it. That does not mean it
+      cannot be traded; it means this site has nothing to show you about it.
+      </div>` : ""}
+
 
     ${q.note ? `<div class="callout"><strong>${esc(q.label)} data.</strong> ${esc(q.note)}</div>` : ""}
 

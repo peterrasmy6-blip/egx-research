@@ -56,6 +56,13 @@ class Security(Base):
     # How many consecutive times the source has returned nothing for this
     # security. Used to stop burning retry time on tickers that are listed but
     # simply not carried by the data source.
+    # How many independent rosters list this security, and whether that is
+    # enough to call the listing confirmed. Two rosters disagree by ~90
+    # tickers, and a name appearing in only one of them -- with no price data
+    # anywhere -- is not something to present as a current listing.
+    sources_listing: Mapped[int] = mapped_column(Integer, default=0)
+    listing_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
     fetch_failures: Mapped[int] = mapped_column(Integer, default=0)
     last_fetch_ok: Mapped[date | None] = mapped_column(Date, nullable=True)
 

@@ -19,6 +19,7 @@ the Python engine. Any mismatch beyond tolerance is a build failure.</p>
 <div id="summary"></div>
 
 <script src="../app/web/static/engine.js"></script>
+<script src="../app/web/static/picker.js"></script>
 <script src="parity_cases.js"></script>
 <script>
 /* CASES is injected by backend/tests/test_js_parity.py, which computes every
@@ -154,6 +155,65 @@ random number stream. Percentiles are checked for agreement within tolerance.</p
     try { fn(); } catch (e) { threw = e instanceof ENGINE.InsufficientData; }
     threw ? pass++ : fail++;
     log(`<pre class="${threw ? "pass" : "fail"}">${threw ? "PASS" : "FAIL"}  refuses ${name}</pre>`);
+  }
+
+  /* ---------------- search / selection ----------------
+     The picker is the only way to choose a company anywhere on the site, so a
+     regression here makes the whole platform unusable rather than merely
+     wrong. These run against the real universe exported into the build. */
+  log("<h2>Search</h2>");
+  const U = C.universe || [];
+  if (!U.length) {
+    fail++; log(`<pre class="fail">FAIL  no universe injected</pre>`);
+  } else {
+    const top = (q, n = 1) => Picker.search(U, q, 12).slice(0, n).map(i => i.ticker);
+    const first = q => top(q)[0];
+    const hits = q => Picker.search(U, q, 60).map(i => i.ticker);
+
+    checkEq("exact ticker wins", first("COMI"), "COMI");
+    checkEq("lower-case ticker works", first("comi"), "COMI");
+    checkEq("full English name finds the company",
+            first("Commercial International Bank"), "COMI");
+    checkEq("partial name finds the company", first("Fawry"), "FWRY");
+    checkEq("out-of-order words still match", first("comm int bank"), "COMI");
+    checkEq("accent folding", first("Sewedy"), "SWDY");
+    checkEq("a keyword returns the sector, biggest first",
+            hits("bank").length > 4 && hits("bank")[0] === "COMI", "true");
+    checkEq("a nonsense query returns nothing",
+            Picker.search(U, "zzzzqqqq", 12).length, 0);
+    checkEq("an empty query offers the largest companies",
+            Picker.search(U, "", 5).length, 5);
+
+    /* The universe must not offer things that are not companies. */
+    const bad = ["AMES_r2", "SVCE_r1", "ARAB_r2", "ASPI_r3", "KRDI_r1",
+                 "FCMD_r3", "EGX30ETF", "KASABF", "FAITA", "VLMR", "CCAPP"];
+    for (const b of bad) {
+      const found = U.some(i => i.ticker.toUpperCase() === b.toUpperCase());
+      found ? fail++ : pass++;
+      log(`<pre class="${found ? "fail" : "pass"}">${found ? "FAIL" : "PASS"}` +
+          `  ${b} is not offered as a company</pre>`);
+    }
+    /* ...and must still offer the company behind each of them. */
+    for (const g of ["AMES", "SVCE", "ARAB", "ASPI", "KRDI", "FCMD",
+                     "ODIN", "FAIT", "VLMRA", "CCAP"]) {
+      const found = U.some(i => i.ticker === g);
+      found ? pass++ : fail++;
+      log(`<pre class="${found ? "pass" : "fail"}">${found ? "PASS" : "FAIL"}` +
+          `  ${g} (the company itself) is offered</pre>`);
+    }
+    /* Renamed tickers must resolve to the current company, not a dead one. */
+    for (const [oldTk, newTk] of [["AUTO", "GBCO"], ["OTMT", "OIH"],
+                                  ["MNHD", "MASR"], ["QNBA", "QNBE"]]) {
+      const dead = U.some(i => i.ticker === oldTk);
+      const alive = U.some(i => i.ticker === newTk);
+      const ok = !dead && alive;
+      ok ? pass++ : fail++;
+      log(`<pre class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}` +
+          `  ${oldTk} folded into ${newTk}</pre>`);
+    }
+    /* Funds are searchable too, and labelled as funds. */
+    const funds = U.filter(i => i.asset_type === "fund");
+    checkEq("funds are searchable", funds.length > 30, "true");
   }
 
   out.innerHTML = results.join("");

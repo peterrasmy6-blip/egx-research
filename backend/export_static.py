@@ -111,6 +111,8 @@ def export_all(verbose: bool = True) -> dict:
         "ticker": s.ticker, "name": s.name_en, "sector": s.sector,
         "asset_type": s.asset_type, "listing_status": s.listing_status,
         "data_quality": s.data_quality,
+        "listing_confirmed": bool(s.listing_confirmed) or s.asset_type != "equity",
+        "sources_listing": s.sources_listing or 0,
         "market_cap": _round(m.market_cap, 0) if m else None,
         "price": (_round(funds_by_sec[s.id].nav, 4)
                   if s.asset_type == "fund" and s.id in funds_by_sec
@@ -181,8 +183,27 @@ def export_all(verbose: bool = True) -> dict:
     quality = dict(db.execute(select(Security.data_quality, func.count(Security.id))
                               .group_by(Security.data_quality)).all())
     built = date.today()
+    from app.ingest.reference_universe import KEEP_EXTRA, summary as ref_summary
+    confirmed = db.scalar(select(func.count(Security.id)).where(
+        Security.asset_type == "equity", Security.listing_status == "listed"))
+    retired = db.scalar(select(func.count(Security.id)).where(
+        Security.asset_type == "equity", Security.listing_status != "listed"))
+    ref = ref_summary()
+    n_funds = db.scalar(select(func.count(Security.id)).where(
+        Security.asset_type == "fund"))
+
     sizes["status"] = _w(os.path.join(DATA_OUT, "status.json"), {
         "securities_listed": len(listed),
+        # Every listed row is now an ordinary share of a company that either
+        # appears on a broker's live instrument list or carries real recent
+        # price history. Rights issues, ETFs, certificates, second share
+        # classes and long-dead tickers are retired rather than counted.
+        "companies_confirmed": confirmed,
+        "companies_unconfirmed": 0,
+        "companies_retired": retired,
+        "companies_off_reference": len(KEEP_EXTRA),
+        "universe_reference": ref,
+        "funds": n_funds,
         "securities_with_prices": db.scalar(
             select(func.count(func.distinct(Price.security_id)))),
         "securities_with_statements": db.scalar(

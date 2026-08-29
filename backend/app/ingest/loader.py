@@ -147,6 +147,15 @@ def sync_universe(verbose: bool = True, use_cache: bool = False) -> dict:
         sec.listing_status = "listed"
         sec.is_active = True
         sec.source_url = rec.get("source_url")
+        sec.sources_listing = rec.get("sources", 1)
+        # Every survivor of the reference filter is a confirmed listing: it is
+        # either on a broker's live instrument list or carries real recent
+        # price history. The old two-roster vote is kept only as a data point.
+        sec.listing_confirmed = True
+        if rec.get("data_note"):
+            sec.data_note = rec["data_note"]
+        elif sec.data_note and sec.data_note.startswith("No longer appears"):
+            sec.data_note = None
         if rec.get("isin"):
             sec.isin = rec["isin"]
         # Curated labels win; never overwrite one with a weaker guess.
@@ -161,9 +170,20 @@ def sync_universe(verbose: bool = True, use_cache: bool = False) -> dict:
         Security.asset_type == "equity",
         Security.listing_status == "listed",
         Security.ticker.notin_(seen) if seen else False)).all()
+    from .reference_universe import EXCLUDED
     for sec in stale:
         sec.listing_status = "delisted"
-        sec.data_note = "No longer appears in the EGX listed roster."
+        # Also stand them down from the price fetch: chasing 60 dead tickers
+        # every run costs minutes of throttled requests for nothing.
+        sec.is_active = False
+        kind_reason = EXCLUDED.get(sec.ticker)
+        if kind_reason:
+            sec.data_note = kind_reason[1]
+        else:
+            sec.data_note = (
+                "Not in the reference stock universe and carries no price "
+                "history from any source. Retired from search; its records are "
+                "kept in case it lists again.")
     if stale:
         db.commit()
 
@@ -489,3 +509,152 @@ def sync_fundamentals(ticker=None, verbose: bool = True) -> dict:
 
     db.close()
     return {"facts": written}
+
+
+# --------------------------------------------------------------------------
+QUOTE_SOURCE = "yahoo-isin-quote"
+
+
+def _isin_symbol(sec) -> str | None:
+    """The Yahoo symbol that carries a quote for a company with no history."""
+    if not sec.isin:
+        return None
+    return sec.isin if sec.isin.endswith(".CA") else sec.isin + ".CA"
+
+
+def resolve_isins(verbose: bool = True) -> dict:
+    """
+    Find Yahoo's ISIN-form symbol for companies we have no price for.
+
+    Yahoo carries most of the EGX twice: under the short ticker ("COMI.CA"),
+    which has full history, and under an ISIN-form symbol
+    ("EGS3C251C013-EGP.CA"), which does not. For roughly a fifth of the
+    exchange -- including large names such as Ezz Steel and Telecom Egypt --
+    only the ISIN form exists. Those companies were showing as "No data"
+    despite a real, current price being available for free.
+
+    This looks the missing ones up by company name and stores the ISIN so
+    `sync_quotes` can fetch that price.
+    """
+    from curl_cffi import requests as cr
+
+    db = SessionLocal()
+    started = datetime.utcnow()
+    s = cr.Session(impersonate="chrome")
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+
+    targets = [sec for sec in db.scalars(select(Security).where(
+        Security.asset_type == "equity",
+        Security.listing_status == "listed",
+        Security.isin.is_(None)))
+        if not db.scalar(select(func.count(Price.id))
+                         .where(Price.security_id == sec.id))]
+
+    found = 0
+    for sec in targets:
+        try:
+            time.sleep(1.2)
+            r = s.get(url, params={"q": sec.name_en, "quotesCount": 8,
+                                   "newsCount": 0}, timeout=25)
+            for q in r.json().get("quotes", []):
+                sym = q.get("symbol", "")
+                # Only an Egyptian ISIN-form symbol will do: a short ticker we
+                # already tried, and a foreign listing would be a different
+                # security in a different currency.
+                if sym.endswith(".CA") and sym.upper().startswith("EGS"):
+                    sec.isin = sym[:-3]
+                    db.commit()
+                    found += 1
+                    if verbose:
+                        print("  %-8s -> %s (%s)"
+                              % (sec.ticker, sym, q.get("shortname") or ""))
+                    break
+        except Exception as e:
+            if verbose:
+                print("  %-8s lookup failed: %s" % (sec.ticker, e))
+
+    if verbose:
+        print("  ISIN resolution: %d of %d companies matched"
+              % (found, len(targets)))
+    _log(db, "resolve_isins", None, "ok", found,
+         "found=%d of %d" % (found, len(targets)), started)
+    db.close()
+    return {"searched": len(targets), "found": found}
+
+
+def sync_quotes(verbose: bool = True) -> dict:
+    """
+    Fetch a current price for companies that have no price history.
+
+    This is deliberately narrow. The ISIN-form symbol returns exactly one bar,
+    so it can give a company a price, a market capitalisation and a day change
+    -- but never a return, a volatility or a drawdown, because there is no
+    series to compute those from. Anything needing history keeps refusing, as
+    it should.
+
+    The row is written with its own source label so it is always distinguishable
+    from real history, and companies that already have history are skipped
+    entirely: a single quote must never be mixed into a proper series.
+    """
+    db = SessionLocal()
+    started = datetime.utcnow()
+
+    targets = []
+    for sec in db.scalars(select(Security).where(
+            Security.asset_type == "equity",
+            Security.listing_status == "listed",
+            Security.isin.isnot(None))):
+        n = db.scalar(select(func.count(Price.id))
+                      .where(Price.security_id == sec.id,
+                             Price.source != QUOTE_SOURCE))
+        if not n:
+            targets.append(sec)
+
+    stored = 0
+    for sec in targets:
+        sym = _isin_symbol(sec)
+        try:
+            time.sleep(THROTTLE_SECONDS)
+            hist, err = _retry(
+                lambda: yf.Ticker(sym).history(period="5d", auto_adjust=False),
+                "quote", attempts=1)
+            if hist is None or not len(hist):
+                if verbose:
+                    print("  %-8s no quote (%s)" % (sec.ticker, sym))
+                continue
+            for ts, r in hist.iterrows():
+                d = ts.date()
+                close = _px(r.get("Close"))
+                if close is None or close <= 0:
+                    continue
+                existing = db.scalar(select(Price).where(
+                    Price.security_id == sec.id, Price.d == d))
+                if existing:
+                    continue
+                db.add(Price(security_id=sec.id, d=d,
+                             open=_px(r.get("Open")), high=_px(r.get("High")),
+                             low=_px(r.get("Low")), close=close,
+                             adj_close=_px(r.get("Adj Close")) or close,
+                             volume=int(r.get("Volume") or 0),
+                             currency=sec.currency or "EGP",
+                             source=QUOTE_SOURCE))
+                stored += 1
+            sec.data_note = (
+                "Current price only. The free source publishes a live quote "
+                "for this company but no price history, so returns, "
+                "volatility and charts are not available for it.")
+            db.commit()
+            if verbose:
+                print("  %-8s quote stored (%s)" % (sec.ticker, sym))
+        except Exception as e:
+            db.rollback()
+            if verbose:
+                print("  %-8s quote failed: %s" % (sec.ticker, e))
+
+    if verbose:
+        print("  quotes: %d rows for %d companies without history"
+              % (stored, len(targets)))
+    _log(db, "sync_quotes", None, "ok", stored,
+         "companies=%d" % len(targets), started)
+    db.close()
+    return {"companies": len(targets), "rows": stored}

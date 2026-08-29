@@ -2,7 +2,8 @@
 Full data refresh, in dependency order.
 
 Order matters:
-  universe -> prices/statements -> integrity -> metrics -> valuations -> coverage
+  universe -> prices/statements -> quotes -> integrity -> metrics ->
+  valuations -> coverage
 Metrics need clean prices; valuations need the metrics snapshot (sector median
 multiples come from it); coverage reports on the finished state.
 
@@ -26,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.db import SessionLocal
 from app.models import init_db
 from app.ingest.loader import (sync_universe, sync_prices, sync_fundamentals,
+                               sync_quotes, resolve_isins,
                                assess_coverage)
 from app.engine.integrity import scan_universe
 from app.engine.trading_days import purge_phantom_dates
@@ -50,6 +52,17 @@ def main(mode: str = "full") -> None:
 
     print("=== PRICES & DIVIDENDS ===", flush=True)
     print(sync_prices(period=period, verbose=False), flush=True)
+
+    # About a fifth of the exchange exists on the price source only under an
+    # ISIN-form symbol, which carries a live quote but no history. Without this
+    # step those companies -- Ezz Steel and Telecom Egypt among them -- show no
+    # price at all. The quote is stored under its own source label so nothing
+    # mistakes one bar for a series.
+    if do_universe:
+        print("=== RESOLVING ISIN SYMBOLS ===", flush=True)
+        print(resolve_isins(verbose=False), flush=True)
+    print("=== QUOTES (companies without history) ===", flush=True)
+    print(sync_quotes(verbose=False), flush=True)
 
     if do_statements:
         print("=== FINANCIAL STATEMENTS ===", flush=True)

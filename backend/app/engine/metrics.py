@@ -85,9 +85,11 @@ def compute_metrics(db, sec) -> dict:
         dd = max_drawdown([p.close for p in clean_series])
         out["max_drawdown_pct"] = round(dd["max_drawdown"] * 100, 2) if dd else None
 
-    # 52-week range
+    # 52-week range. A company we hold only a current quote for has a single
+    # bar, which would otherwise report itself as both its own 52-week high and
+    # low and sit at "0% from high" -- true, and completely uninformative.
     yr = [p for p in series if p.d >= last.d - timedelta(days=365)]
-    if yr:
+    if len(yr) > 5:
         hi = max(p.close for p in yr)
         lo = min(p.close for p in yr)
         out["high_52w"], out["low_52w"] = hi, lo
