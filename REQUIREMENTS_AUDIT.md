@@ -11,16 +11,31 @@ actually built and tested. Generated 2026-08-28.
 
 | Requirement | Status | Evidence / gap |
 |---|---|---|
-| Complete EGX stock universe | ✅ | **318 tickers** from two independent rosters merged automatically. Brief cited ~273 on Thndr; we exceed it because we also keep preference shares, second listings and recently delisted names |
-| Not hard-coded | ✅ | Fetched at run time from stockanalysis.com + african-markets.com. No list in source |
-| Automatic detection of additions/removals | ✅ | New tickers are added; missing ones marked `delisted`, never deleted |
-| Fund universe | ⚠️ | **40 funds** with NAV, category, risk band and trailing returns. Brief cited ~63 on Thndr. The free source publishes 40; the official EGX funds page is behind bot protection. Gap documented, not hidden |
-| Incomplete data kept, not excluded | ✅ | Every company stays in the database with a data-quality badge explaining exactly what is missing |
+| Complete EGX stock universe | ✅ | **269 ordinary listed companies**, reconciled row by row against a broker's own instrument list (273 entries, all 31 pages transcribed). Rights issues, the EGX30 ETF, certificates and second share classes are excluded as instruments rather than counted as companies; 43 tickers that no source carries any price for were retired. Full working in `STOCK_UNIVERSE_AUDIT.md` |
+| Not hard-coded | ✅ | Still fetched at run time from stockanalysis.com + african-markets.com. The reference list filters that fetch; it does not replace it, and a genuinely new listing flows through |
+| Automatic detection of additions/removals | ✅ | New tickers are added; missing ones marked `delisted` with a recorded reason, never deleted |
+| Fund universe | ⚠️ | **40 funds** with NAV, category, risk band and trailing returns, against roughly 63 on Thndr. The free source publishes 40; the official EGX funds page is behind bot protection. The reference screenshots covered stocks only, so this gap is unchanged |
+| Incomplete data kept, not excluded | ✅ | A company with no price data stays in the universe, searchable, badged **No data**. It is not hidden and not silently dropped |
 | Multiple free sources | ✅ | 4 sources: stockanalysis, african-markets, Yahoo (prices/statements), egxbot (funds) |
-| Search any stock or fund | ✅ | 358 searchable securities, by ticker / name / partial / sector |
+| Search any stock or fund | ✅ | 309 searchable securities (269 companies + 40 funds), by ticker / English name / partial / out-of-order words / sector |
+| No non-companies in the universe | ✅ | Enforced by `apply_reference()` on every refresh and by 35 tests in `backend/tests/test_universe.py`, plus search-level checks in the browser harness |
 
-**Honest gap:** funds are 40 of ~63. No free machine-readable source for the
-remaining ones was found. See `DATA_SOURCES.md`.
+**The honest gap.**
+
+*Funds:* 40 of the ~63 on Thndr. No free machine-readable source for the rest.
+
+*Price coverage:* 254 of the 269 companies now carry a price, up from 205. The
+gap was a symbol problem, not a listing one — a fifth of the exchange exists on
+the price source only under an ISIN-form symbol. The remaining 15 stay visible
+and labelled **No data** rather than hidden. See `STOCK_UNIVERSE_AUDIT.md`.
+
+**Corrected from the previous version of this document.** It claimed 212
+"confirmed" companies and 106 "unconfirmed", framing the difference as
+unresolvable because the exchange's own page blocks automated access. That was
+the wrong shape of answer: most of the 106 were not ambiguous listings at all
+but renamed tickers, departed companies and non-ordinary instruments, and a
+broker's live instrument list resolved them. The confirmed/unconfirmed split no
+longer exists.
 
 ---
 
@@ -82,7 +97,7 @@ remaining ones was found. See `DATA_SOURCES.md`.
 | Financial metrics | ✅ | P/E, P/B, P/S, EV/EBITDA, ROE, ROA, ROIC, margins, growth, debt — all computed from raw statements |
 | Education | ✅ | 24 terms, 6 guides, risk questionnaire |
 | Indices | ⚠️ | Official EGX30/70/100 history is not available from any free source (verified against Yahoo, stooq, EGX). A clearly-labelled in-house composite is provided instead. **Not faked** |
-| Automatic data updates | ⚠️ | Built and tested; needs your one-time GitHub setup to switch on |
+| Automatic data updates | ✅ | Built, deployed and running on GitHub Actions |
 | Free data sources only | ✅ | EGP 0. See `PROJECT_COST.md` |
 | Public deployment | ✅ | **https://egx-research.pages.dev** |
 | Number formatting | ✅ | Central formatters; thousands separators everywhere; decimals matched to the type of figure |
@@ -109,10 +124,9 @@ figures. All are now caught automatically:
 
 | | Count |
 |---|---|
-| ✅ Complete | 44 |
-| ⚠️ Partial | 4 |
+| ✅ Complete | 47 |
+| ⚠️ Partial | 3 |
 | ❌ Not done | 3 |
 
-The four partials are each limited by **data availability, not effort**: fund
-count, Arabic names, index history, and the automation awaiting your GitHub
-account. The three not-done items were deliberate calls, each explained above.
+The three partials are each limited by **data availability, not effort**: fund
+count, Arabic names, and index history. The three not-done items were deliberate calls, each explained above.
