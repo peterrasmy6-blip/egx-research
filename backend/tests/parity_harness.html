@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Engine parity harness</title>
+<style>
+ body{font:14px/1.5 ui-monospace,Consolas,monospace;padding:20px;background:#0f1723;color:#e6edf3}
+ .pass{color:#3fb950} .fail{color:#f85149;font-weight:700}
+ h2{color:#8b949e;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px}
+ pre{margin:2px 0}
+ #summary{font-size:18px;font-weight:700;padding:14px;border-radius:8px;margin-top:20px;background:#161b22}
+</style>
+</head>
+<body>
+<h1 style="font-size:16px">JavaScript ⇄ Python engine parity</h1>
+<p style="color:#8b949e">Compares the browser engine against values computed by
+the Python engine. Any mismatch beyond tolerance is a build failure.</p>
+<div id="out">Running…</div>
+<div id="summary"></div>
+
+<script src="../app/web/static/engine.js"></script>
+<script src="parity_cases.js"></script>
+<script>
+/* CASES is injected by backend/tests/test_js_parity.py, which computes every
+   expected value with the Python engine before opening this page. */
+window.CASES = window.CASES || null;
+
+const out = document.getElementById("out");
+let pass = 0, fail = 0;
+const results = [];
+
+function log(html) { results.push(html); }
+
+function near(a, b, tol) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) <= tol;
+}
+
+function check(name, got, want, tol = 0.01) {
+  const ok = near(got, want, tol);
+  ok ? pass++ : fail++;
+  log(`<pre class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}  ${name}` +
+      (ok ? "" : `   js=${got}  py=${want}  diff=${got == null || want == null ? "n/a" : Math.abs(got - want)}`) +
+      `</pre>`);
+}
+
+function checkEq(name, got, want) {
+  const ok = String(got) === String(want);
+  ok ? pass++ : fail++;
+  log(`<pre class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}  ${name}` +
+      (ok ? "" : `   js=${got}  py=${want}`) + `</pre>`);
+}
+
+function run() {
+  if (!window.CASES) { out.innerHTML = "<pre class='fail'>No cases injected.</pre>"; return; }
+  const C = window.CASES;
+
+  /* ---------------- pure statistics ---------------- */
+  log("<h2>Statistics</h2>");
+  check("cagr 100->200 over 1y", ENGINE.cagr(100, 200, 1), C.stats.cagr_double, 1e-9);
+  checkEq("cagr refuses sub-year", ENGINE.cagr(100, 150, 0.5), C.stats.cagr_subyear);
+  check("max drawdown", ENGINE.maxDrawdown(C.stats.dd_input).max_drawdown,
+        C.stats.dd_expected, 1e-9);
+  check("volatility", ENGINE.annualisedVolatility(C.stats.vol_input),
+        C.stats.vol_expected, 1e-9);
+  check("sharpe", ENGINE.sharpeRatio(C.stats.vol_input, 0.205),
+        C.stats.sharpe_expected, 1e-9);
+
+  /* ---------------- lump sum ---------------- */
+  for (const c of C.lump_sum) {
+    log(`<h2>Lump sum — ${c.label}</h2>`);
+    const r = ENGINE.lumpSum(c.company, c.amount, c.start, c.opts);
+    for (const [k, want] of Object.entries(c.expect)) {
+      const tol = (k.endsWith("_pct")) ? 0.011 : (k === "shares_bought" ? 0.0002 : 0.02);
+      if (typeof want === "boolean" || typeof want === "string") checkEq(k, r[k], want);
+      else check(k, r[k], want, tol);
+    }
+  }
+
+  /* ---------------- monthly plan ---------------- */
+  for (const c of C.monthly) {
+    log(`<h2>Monthly plan — ${c.label}</h2>`);
+    const r = ENGINE.monthlyPlan(c.company, c.monthly_amount, c.start, c.opts);
+    for (const [k, want] of Object.entries(c.expect)) {
+      if (typeof want === "string") checkEq(k, r[k], want);
+      else check(k, r[k], want, k.endsWith("_pct") ? 0.011 : 0.02);
+    }
+  }
+
+  /* ---------------- backtest ---------------- */
+  for (const c of C.backtest) {
+    log(`<h2>Backtest — ${c.label}</h2>`);
+    const r = ENGINE.backtest(c.companies, c.holdings, c.start, c.opts);
+    for (const [k, want] of Object.entries(c.expect)) {
+      if (typeof want === "string") checkEq(k, r[k], want);
+      else check(k, r[k], want, k.endsWith("_pct") ? 0.011 : 0.05);
+    }
+  }
+
+  /* ---------------- projections ---------------- */
+  for (const c of C.projection) {
+    log(`<h2>Projection — ${c.label}</h2>`);
+    const r = ENGINE.scenarioProjection(c.initial, c.monthly, c.years,
+                                        c.returns, c.inflation, c.increase);
+    for (const [k, want] of Object.entries(c.expect)) {
+      check(k, r.scenarios[c.scenario][k], want, 0.02);
+    }
+  }
+
+  /* ---------------- portfolio composition ---------------- */
+  for (const c of C.composition) {
+    log(`<h2>Portfolio — ${c.label}</h2>`);
+    const r = ENGINE.analyseComposition(c.metrics, c.holdings);
+    check("largest_holding_pct", r.largest_holding_pct, c.expect.largest_holding_pct);
+    check("largest_sector_pct", r.largest_sector_pct, c.expect.largest_sector_pct);
+    check("effective_holdings", r.effective_holdings, c.expect.effective_holdings, 0.11);
+  }
+
+  /* ---------------- monte carlo (statistical, not identical) ---------------- */
+  log("<h2>Monte Carlo — distributional agreement</h2>");
+  log(`<pre style="color:#8b949e">Stochastic: JavaScript cannot reproduce Python's
+random number stream. Percentiles are checked for agreement within tolerance.</pre>`);
+  for (const c of C.monte_carlo) {
+    const r = ENGINE.monteCarlo(c.initial, c.monthly, c.years, c.annual_return,
+                                c.annual_volatility, c.opts);
+    for (const [k, want] of Object.entries(c.expect.percentiles)) {
+      const tolPct = 0.06;      // 6% relative
+      const got = r.percentiles[k];
+      const ok = Math.abs(got - want) <= Math.abs(want) * tolPct;
+      ok ? pass++ : fail++;
+      log(`<pre class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}  ${c.label} ${k}` +
+          (ok ? ` (js ${Math.round(got).toLocaleString()} vs py ${Math.round(want).toLocaleString()})`
+              : `   js=${got}  py=${want}  off by ${(Math.abs(got - want) / Math.abs(want) * 100).toFixed(1)}%`) +
+          `</pre>`);
+    }
+    // Deterministic parts must match exactly.
+    check(`${c.label} total_contributed`, r.total_contributed, c.expect.total_contributed, 0.02);
+    check(`${c.label} total_contributed_real`, r.total_contributed_real,
+          c.expect.total_contributed_real, 0.05);
+  }
+
+  /* ---------------- screener / compare parity ---------------- */
+  log("<h2>Refusals</h2>");
+  const refusals = [
+    ["pre-history date", () => ENGINE.lumpSum(C.lump_sum[0].company, 1000, "1990-01-01", {})],
+    ["negative amount", () => ENGINE.lumpSum(C.lump_sum[0].company, -5, "2022-01-03", {})],
+    ["zero volatility", () => ENGINE.monteCarlo(1000, 0, 5, 0.1, 0, {})],
+    ["absurd horizon", () => ENGINE.monteCarlo(1000, 0, 99, 0.1, 0.2, {})],
+    ["empty holdings", () => ENGINE.backtest({}, [], "2022-01-03", {})],
+  ];
+  for (const [name, fn] of refusals) {
+    let threw = false;
+    try { fn(); } catch (e) { threw = e instanceof ENGINE.InsufficientData; }
+    threw ? pass++ : fail++;
+    log(`<pre class="${threw ? "pass" : "fail"}">${threw ? "PASS" : "FAIL"}  refuses ${name}</pre>`);
+  }
+
+  out.innerHTML = results.join("");
+  const s = document.getElementById("summary");
+  s.className = fail ? "fail" : "pass";
+  s.textContent = `${pass} passed, ${fail} failed`;
+  window.__RESULT__ = {pass, fail};
+}
+
+try { run(); }
+catch (e) {
+  out.innerHTML = `<pre class="fail">Harness crashed: ${e.message}\n${e.stack}</pre>`;
+  window.__RESULT__ = {pass, fail: fail + 1, error: e.message};
+}
+</script>
+</body>
+</html>
