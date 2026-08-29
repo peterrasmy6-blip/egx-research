@@ -150,6 +150,80 @@ check("every retired ticker records why it was retired",
 
 db.close()
 
+
+print("\n--- an older database is brought up to date ---")
+
+# The deploy pipeline keeps its database in a cache between runs, so it can be
+# far older than the code. A run failed with "no such column:
+# securities.sources_listing" because a column added later was never applied to
+# that cached copy. This proves the migration closes the gap.
+import os
+import shutil
+import sqlite3
+import tempfile
+
+from sqlalchemy import create_engine, select as sa_select
+from sqlalchemy.orm import sessionmaker
+
+from app.models import Base, ensure_schema
+
+LATER_COLUMNS = ["sources_listing", "listing_confirmed", "price_integrity",
+                 "price_safe_from", "fetch_failures", "last_fetch_ok",
+                 "data_note"]
+
+src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                   "..", "..", "data", "egx.db")
+if not os.path.exists(src):
+    check("older-database migration (needs data/egx.db)", False, "no database")
+else:
+    tmp = os.path.join(tempfile.gettempdir(), "egx_schema_check.db")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    shutil.copy(src, tmp)
+
+    raw = sqlite3.connect(tmp)
+    dropped = []
+    for col in LATER_COLUMNS:
+        try:
+            raw.execute("ALTER TABLE securities DROP COLUMN %s" % col)
+            dropped.append(col)
+        except Exception:
+            pass                       # an older SQLite cannot drop; skip it
+    raw.commit()
+    before = {r[1] for r in raw.execute("PRAGMA table_info(securities)")}
+    raw.close()
+
+    check("the fixture really is missing the later columns",
+          bool(dropped) and not (set(dropped) & before),
+          str(sorted(before))[:60])
+
+    eng = create_engine("sqlite:///" + tmp)
+    Base.metadata.create_all(eng)      # as init_db does: creates tables only
+    added = ensure_schema(eng, verbose=False)
+    check("the migration adds every missing column",
+          set(dropped) <= {a.split(".", 1)[1] for a in added},
+          "added=%s" % added)
+
+    # The exact query that brought the pipeline down.
+    Sess = sessionmaker(bind=eng)
+    sess = Sess()
+    try:
+        row = sess.scalar(sa_select(Security).where(Security.ticker == "COMI"))
+        check("selecting a company no longer raises OperationalError",
+              row is not None and row.ticker == "COMI")
+    except Exception as e:
+        check("selecting a company no longer raises OperationalError",
+              False, type(e).__name__ + ": " + str(e)[:70])
+    sess.close()
+
+    # A second run must not try to add the same columns again.
+    again = ensure_schema(eng, verbose=False)
+    check("the migration is safe to run repeatedly", again == [], str(again))
+
+    eng.dispose()
+    os.remove(tmp)
+
+
 print("\n" + "=" * 54)
 print("  %d passed, %d failed" % (PASS, FAIL))
 print("=" * 54)

@@ -289,6 +289,69 @@ class SecurityMetrics(Base):
     valuation_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+def ensure_schema(engine, verbose: bool = True) -> list[str]:
+    """
+    Add any columns the models have gained since a database was created.
+
+    `create_all` creates missing *tables* but never touches an existing one, so
+    a database made before a column was added keeps working right up until
+    something selects that column -- and then every query against the table
+    fails at once.
+
+    That is not hypothetical: the deploy pipeline keeps its database in a cache
+    between runs, so it can be months older than the code. A run failed with
+    "no such column: securities.sources_listing" for exactly this reason.
+
+    Only additive, nullable columns can be handled this way. SQLite refuses to
+    add a column that is PRIMARY KEY or UNIQUE, or one whose default is not a
+    constant, so those are reported rather than attempted -- a database needing
+    one of those has to be rebuilt, and saying so is better than half-migrating
+    it.
+    """
+    from sqlalchemy import inspect, text
+
+    added: list[str] = []
+    insp = inspect(engine)
+    existing_tables = set(insp.get_table_names())
+
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue                      # create_all will make it
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                if col.primary_key or col.unique:
+                    if verbose:
+                        print("  ! %s.%s cannot be added in place (%s); "
+                              "the database needs rebuilding"
+                              % (table.name, col.name,
+                                 "primary key" if col.primary_key else "unique"))
+                    continue
+                ddl = "ALTER TABLE %s ADD COLUMN %s %s" % (
+                    table.name, col.name, col.type.compile(engine.dialect))
+                if not col.nullable:
+                    # A NOT NULL column needs a constant default to fill the
+                    # rows that already exist.
+                    if col.default is None or getattr(col.default, "is_callable", False):
+                        if verbose:
+                            print("  ! %s.%s is NOT NULL with no constant "
+                                  "default; skipped" % (table.name, col.name))
+                        continue
+                    ddl += " NOT NULL DEFAULT %r" % (col.default.arg,)
+                conn.execute(text(ddl))
+                added.append("%s.%s" % (table.name, col.name))
+                if verbose:
+                    print("  + added column %s.%s" % (table.name, col.name))
+
+    if verbose and not added:
+        print("  schema is up to date")
+    return added
+
+
 def init_db() -> None:
     from .db import engine
     Base.metadata.create_all(engine)
+    # Bring an older database up to the current shape before anything reads it.
+    ensure_schema(engine, verbose=True)
