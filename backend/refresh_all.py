@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.db import SessionLocal
 from app.models import init_db
 from app.ingest.loader import (sync_universe, sync_prices, sync_fundamentals,
-                               sync_quotes, resolve_isins,
+                               sync_quotes, resolve_isins, sync_funds,
                                assess_coverage)
 from app.engine.integrity import scan_universe, mark_bad_prints
 from app.engine.trading_days import purge_phantom_dates
@@ -69,6 +69,31 @@ def main(mode: str = "full") -> None:
               % (r["reclassified"], r["cleared"], r["unchanged"]), flush=True)
     finally:
         _sec_db.close()
+
+    # Funds, on every run.
+    #
+    # This step did not exist: sync_funds was written and then never called by
+    # anything, so the forty Egyptian funds were loaded once by hand and never
+    # again. On a machine with that old database they were simply there; on a
+    # cold rebuild they were not, which is how the live site came to publish an
+    # empty Funds section without a single error.
+    #
+    # A failure here is survivable -- sync_funds leaves the funds already
+    # stored untouched and reports the error -- so it must not stop a price
+    # refresh. verify_build is what refuses to publish a site with no funds.
+    print("=== FUNDS ===", flush=True)
+    try:
+        fr = sync_funds(verbose=False)
+        if fr.get("error"):
+            print("  fund source failed: %s (keeping what we already hold)"
+                  % fr["error"], flush=True)
+        else:
+            print("  %d funds: %d new, %d updated, %d closed"
+                  % (fr.get("total", 0), fr.get("added", 0),
+                     fr.get("updated", 0), fr.get("closed", 0)), flush=True)
+    except Exception as _e:                                     # noqa: BLE001
+        print("  fund step failed: %s (keeping what we already hold)" % _e,
+              flush=True)
 
     print("=== PRICES & DIVIDENDS ===", flush=True)
     print(sync_prices(period=period, verbose=False), flush=True)

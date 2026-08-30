@@ -24,6 +24,10 @@ DATA = os.path.join(SITE, "data")
 # Floors, not targets. Set below current reality so ordinary drift is fine,
 # but a collapse in coverage is caught.
 MIN_LISTED = 180
+# The free fund source publishes about forty. Any collapse toward zero means
+# the source moved or died, and the live site has already published an empty
+# Funds section once because nothing here was watching.
+MIN_FUNDS = 25
 MIN_WITH_PRICES = 150
 MIN_WITH_STATEMENTS = 60
 MIN_PRICE_ROWS = 350_000
@@ -206,6 +210,10 @@ def main() -> int:
         if st.get("price_rows", 0) < MIN_PRICE_ROWS:
             fail("only %s price rows (expected >= %d)"
                  % (st.get("price_rows"), MIN_PRICE_ROWS))
+        if st.get("funds", 0) < MIN_FUNDS:
+            fail("only %s funds (expected >= %d) - the fund source has "
+                 "probably failed, and publishing now would ship an empty "
+                 "Funds section" % (st.get("funds"), MIN_FUNDS))
 
         latest = st.get("latest_market_date")
         if not latest:
