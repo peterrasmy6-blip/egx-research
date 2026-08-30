@@ -196,6 +196,18 @@ def sync_universe(verbose: bool = True, use_cache: bool = False) -> dict:
     if stale:
         db.commit()
 
+    # Backfill reasons for anything already retired.
+    #
+    # The loop above only reaches rows that are LISTED right now, because it is
+    # driven by "what disappeared from the roster this run". A row retired by an
+    # older version of this code -- before reasons were written at all -- is
+    # never visited again, so an empty reason stayed empty forever. That is
+    # invisible on a machine whose database saw the transition and permanent on
+    # one that did not, which is exactly how this passed here and failed on CI.
+    filled = ensure_retirement_reasons(db)
+    if filled and verbose:
+        print("  backfilled %d retirement reason(s)" % filled)
+
     if verbose:
         print("  universe stored: %d new, %d updated, %d marked delisted"
               % (added, updated, len(stale)))
@@ -318,6 +330,54 @@ def sync_funds(verbose: bool = True) -> dict:
     db.close()
     return {"added": added, "updated": updated, "closed": len(stale),
             "total": len(rows)}
+
+
+def ensure_retirement_reasons(db, verbose: bool = False) -> int:
+    """
+    Give every retired security a stated reason, and never overwrite a good one.
+
+    Nothing may be dropped from the universe silently: a ticker that vanishes
+    from search with no explanation is indistinguishable from a bug. This is
+    idempotent by design, so it can run on every refresh and repair a database
+    retired under older code.
+    """
+    from .reference_universe import EXCLUDED, RENAMES
+
+    fixed = 0
+    rows = db.scalars(select(Security).where(
+        Security.asset_type == "equity",
+        Security.listing_status != "listed")).all()
+
+    for sec in rows:
+        # Where the reference list states why a ticker is excluded, that reason
+        # is authoritative and replaces whatever is there. It is not enough to
+        # fill only the empty ones: CCAPP read "no financial statements were
+        # found", which is true, is not why it was retired, and looked like a
+        # perfectly good note. A wrong explanation hides better than a missing
+        # one.
+        kind_reason = EXCLUDED.get(sec.ticker)
+        if kind_reason:
+            want = kind_reason[1]
+        elif sec.ticker in RENAMES:
+            want = ("Renamed. The company is covered once, as %s."
+                    % RENAMES[sec.ticker])
+        elif sec.data_note:
+            # No authoritative reason for this one, and something is already
+            # recorded. Leave it: it is the best we have.
+            continue
+        else:
+            want = ("Not in the reference stock universe and carries no price "
+                    "history from any source. Retired from search; its records "
+                    "are kept in case it lists again.")
+        if sec.data_note != want:
+            sec.data_note = want
+            fixed += 1
+
+    if fixed:
+        db.commit()
+        if verbose:
+            print("  filled %d missing retirement reason(s)" % fixed)
+    return fixed
 
 
 def assess_coverage(verbose: bool = True) -> dict:

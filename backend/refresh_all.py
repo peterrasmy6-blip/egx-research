@@ -28,6 +28,7 @@ from app.db import SessionLocal
 from app.models import init_db
 from app.ingest.loader import (sync_universe, sync_prices, sync_fundamentals,
                                sync_quotes, resolve_isins, sync_funds,
+                               ensure_retirement_reasons,
                                assess_coverage)
 from app.engine.integrity import scan_universe, mark_bad_prints
 from app.engine.trading_days import purge_phantom_dates
@@ -60,6 +61,17 @@ def main(mode: str = "full") -> None:
     # cinema producer under Financial Services. This costs nothing (no network,
     # no queries beyond one pass over the companies) and makes a correction to
     # the rules take effect the next time anything runs at all.
+    # Retirement reasons, on every mode for the same reason as sectors: the
+    # database is cached between runs, and a row retired under older code
+    # keeps its empty reason until something goes looking for it.
+    print("=== RETIREMENT REASONS ===", flush=True)
+    _rr_db = SessionLocal()
+    try:
+        n = ensure_retirement_reasons(_rr_db)
+        print("  %d filled" % n, flush=True)
+    finally:
+        _rr_db.close()
+
     print("=== SECTORS ===", flush=True)
     from app.ingest.reclassify_sectors import reclassify
     _sec_db = SessionLocal()

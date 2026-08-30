@@ -18,6 +18,7 @@ from app.ingest.discovery import (apply_reference, classify_sector,
                                   classify_sector_strong,
                                   classify_sector_weak, CURATED_SECTORS)
 from app.models import Security
+from app.ingest.loader import ensure_retirement_reasons
 
 PASS = FAIL = 0
 
@@ -299,6 +300,51 @@ _redundant = [tk for tk, want in CURATED_SECTORS.items()
 check("every listed curated ticker holds its curated sector", not _redundant,
       "offenders: %s" % _redundant[:5])
 _db2.close()
+
+
+# ------------------------------------------------ retirement reasons repair
+#
+# The reason a ticker leaves the universe used to be written only at the
+# moment it flipped from listed to delisted. That loop is driven by "what
+# disappeared from the roster this run", so it only ever sees rows that are
+# listed right now -- and a row retired by older code, before reasons were
+# written at all, was never visited again. Its reason stayed empty forever.
+#
+# That is invisible on a machine whose database happened to see the
+# transition and permanent on one that did not, which is precisely how this
+# passed locally and failed on CI with FAITA and CCAPP.
+print("\n--- retirement reasons repair ---")
+
+_retired = db.scalars(Security.__table__.select().with_only_columns(
+    Security.ticker).where(
+        (Security.asset_type == "equity")
+        & (Security.listing_status != "listed"))).all()
+
+check("the backfill is idempotent once every reason is present",
+      ensure_retirement_reasons(db) == 0,
+      "a second pass must change nothing")
+
+# Every excluded instrument must give the reference list's own reason, not
+# whatever data-quality text happened to be sitting in the field. CCAPP was
+# passing on the strength of "no financial statements were found", which is
+# true but is not why it was retired.
+_wrong = []
+for _tk, _kr in R.EXCLUDED.items():
+    _row = db.scalar(Security.__table__.select().with_only_columns(
+        Security.data_note).where(Security.ticker == _tk))
+    if _row is not None and _row != _kr[1]:
+        _wrong.append(_tk)
+check("every excluded ticker carries the reference list's reason, not a "
+      "data-quality note", not _wrong, "offenders: %s" % _wrong[:5])
+
+check("a renamed ticker names the company that replaced it",
+      all((db.scalar(Security.__table__.select().with_only_columns(
+              Security.data_note).where(Security.ticker == _old)) or "")
+          .find(_new) >= 0
+          for _old, _new in list(R.RENAMES.items())
+          if db.scalar(Security.__table__.select().with_only_columns(
+              Security.ticker).where(Security.ticker == _old))),
+      "a rename should point at its successor")
 
 
 print("\n" + "=" * 54)
