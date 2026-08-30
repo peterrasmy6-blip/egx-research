@@ -5,9 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EGX Research — Egyptian Exchange analysis, valuation and education</title>
 <meta name="description" content="Free research, valuation, historical scenarios and financial education for the Egyptian Exchange. Real data. Not investment advice.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="/static/fonts/inter-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css">
 <!-- Chart.js is served from this site rather than a public CDN. Two reasons:
      a compromised CDN would execute with full access to the page, and this
      project has already had one host turn out to be unreachable from Egypt --
@@ -110,6 +109,8 @@
       <a href="/terms" onclick="go('/terms')">Terms and disclaimer</a>
       <span>·</span>
       <a href="/learn" onclick="go('/learn')">Learn investing</a>
+      <span>·</span>
+      <a href="/contact" onclick="go('/contact')" data-i18n="nav.contact">Contact and corrections</a>
     </p>
     <p class="foot-note">Research. Understand. Decide.</p>
   </div>
@@ -132,6 +133,7 @@
 <script src="static/peers.js"></script>
 <script src="static/paper.js"></script>
 <script src="static/weekly.js"></script>
+<script src="static/contact.js"></script>
 <script>boot();</script>
 </body>
 </html>

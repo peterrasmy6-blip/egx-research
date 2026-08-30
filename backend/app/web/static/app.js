@@ -141,6 +141,7 @@ function render() {
     "/learn": viewLearn,
     "/methodology": viewMethodology,
     "/terms": viewTerms,
+    "/contact": viewContact,
     "/sector": viewSector,
     "/funds": viewFunds,
     "/data-quality": viewQuality,

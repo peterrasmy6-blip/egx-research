@@ -143,9 +143,13 @@ function renderPortfolioForecast(r, box) {
 
     ${r.risk_note ? `<div class="callout">${esc(r.risk_note)}</div>` : ""}
 
-    <h4 style="margin:24px 0 10px;font-size:15px">Three scenarios</h4>
+    <h4 style="margin:24px 0 10px;font-size:15px">Three steady paths</h4>
+    <p class="muted" style="font-size:13px;margin:0 0 12px">
+      These grow at one constant rate a year, which is not how returns actually
+      arrive. They are here to show the shape of the range, not to compete with
+      the simulated figures above.</p>
     <div class="stats">
-      ${[["conservative","Cautious"],["base","Middle"],["optimistic","Optimistic"]].map(([k,l]) =>
+      ${[["conservative","Cautious"],["base","Central"],["optimistic","Optimistic"]].map(([k,l]) =>
         `<div class="stat"><div class="k">${l} (${pctPlain(s[k].annual_return_pct)}/yr)</div>
           <div class="v ${cls(s[k].final - r.total_contributed)}">${egp(s[k].final)}</div>
           <div class="note">${egp(s[k].path[s[k].path.length-1].real)} in today's money</div></div>`).join("")}
@@ -158,6 +162,13 @@ function renderPortfolioForecast(r, box) {
       cases are not guesses — they are the middle estimate moved by this
       portfolio's own measured volatility of ${pctPlain(r.volatility_pct)}. A
       steadier portfolio would show a narrower cone; a riskier one, wider.
+      <p style="margin:8px 0 0;font-size:12.5px;color:var(--ink-3)">
+        The central path above lands a little apart from the simulated middle,
+        and that gap is real rather than a rounding error: a run of returns
+        that averages ${pctPlain(s.base.annual_return_pct)} a year ends lower
+        than ${pctPlain(s.base.annual_return_pct)} every year, because a fall
+        takes a larger gain to undo. The simulated figure is the one to trust.
+      </p>
     </div>
 
     <h4 style="margin:24px 0 10px;font-size:15px">The full range of outcomes</h4>

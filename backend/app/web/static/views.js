@@ -25,11 +25,15 @@ function viewHome(view) {
 
   const movers = (rows, label) => `
     <div class="card">
-      <div class="card-head"><h2>${label}</h2><p class="sub">Total return over the last year.</p></div>
+      <div class="card-head"><h2>${label}</h2>
+        <p class="sub">Total return over the last year. A badge marks a share
+          that trades thinly — on those, a large move can be one small order
+          rather than news.</p></div>
       <div class="table-scroll"><table class="tbl"><tbody>
         ${rows.map(s => `<tr onclick="go('/stock/${esc(s.ticker)}')">
           <td class="tk">${esc(s.ticker)}</td>
-          <td style="text-align:left;color:var(--ink-2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(s.name.slice(0, 34))}</td>
+          <td style="text-align:left;color:var(--ink-2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(s.name.slice(0, 34))}
+            ${liquidityBadge(s.liquidity_band) || ""}</td>
           <td>${price(s.price)}</td>
           <td class="${cls(s.ret_1y)}" style="font-weight:600">${pct(s.ret_1y)}${
             s.real_ret_1y != null

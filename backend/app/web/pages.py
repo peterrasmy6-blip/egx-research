@@ -35,6 +35,11 @@ import os
 import re
 
 SITE_NAME = "EGX Research"
+
+# The only contact address on the site. Kept here so it is changed in one
+# place: a site that publishes a page about its own data faults needs a way
+# to be told about the ones it has not found.
+CONTACT_EMAIL = "peterrasmy6@gmail.com"
 DEFAULT_DESC = ("Free research, valuation, historical scenarios and financial "
                 "education for the Egyptian Exchange. Real data, calculated "
                 "from company filings. Not investment advice.")
@@ -62,6 +67,49 @@ def _big(x, currency="EGP") -> str:
         if abs(x) >= cut:
             return "%s %.2f%s" % (currency, x / cut, suffix)
     return "%s %.2f" % (currency, x)
+
+
+# Google shows roughly 60 characters of a title and drops the rest. Every
+# company title here ran to about 95, so the part that survived was the
+# company name and the part that vanished was everything explaining what the
+# page was. The searched phrase is "<name> share price", so that is what is
+# protected; the site name is a nicety and goes first when room runs out.
+TITLE_BUDGET = 60
+
+
+def _fit_title(core: str, brand: bool = True) -> str:
+    """`core`, with the site name appended only if it still fits."""
+    if brand:
+        full = "%s | %s" % (core, SITE_NAME)
+        if len(full) <= TITLE_BUDGET:
+            return full
+    return core
+
+
+def company_title(name: str, ticker: str, is_fund: bool = False) -> str:
+    # A fund's identifier is a 60-character slug, not a ticker anyone types.
+    # Printing it swallows the whole title and helps nobody.
+    if is_fund:
+        # Fund names run to a hundred characters and carry two bank names
+        # before their own. Keep the front, which is the manager people
+        # actually search for, and only label it a fund if there is room.
+        for tail in (" — Egyptian investment fund", " — investment fund", ""):
+            if len(name) + len(tail) <= TITLE_BUDGET:
+                return name + tail
+        return name[:TITLE_BUDGET - 1].rstrip(" —-,(&") + "…"
+
+
+    for core in ("%s (%s) share price and valuation" % (name, ticker),
+                 "%s (%s) share price" % (name, ticker)):
+        fitted = _fit_title(core)
+        if len(fitted) <= TITLE_BUDGET:
+            return fitted
+    # Still too long: shorten the name, never the ticker. Someone searching
+    # for a company this obscure is far more likely to type the ticker.
+    tail = " (%s) share price" % ticker
+    room = max(12, TITLE_BUDGET - len(tail))
+    clipped = name[:room].rstrip(" -,(&").rstrip()
+    return "%s%s" % (clipped, tail)
 
 
 # --------------------------------------------------------------------------
@@ -145,8 +193,8 @@ def company_page(s, m, val, site_url: str) -> tuple[str, str, str, list]:
     name, ticker = s.name_en, s.ticker
     cur = s.currency or "EGP"
 
-    title = "%s (%s) share price, valuation and financials | %s" % (
-        name, ticker, SITE_NAME)
+    title = company_title(name, ticker,
+                          is_fund=(getattr(s, "asset_type", "") == "fund"))
 
     bits = ["%s (%s) on the Egyptian Exchange." % (name, ticker)]
     if m and m.price is not None:
@@ -234,7 +282,7 @@ def company_page(s, m, val, site_url: str) -> tuple[str, str, str, list]:
 # description that reads as a sentence rather than a keyword list.
 STATIC_ROUTES = {
     "/": (
-        "%s — Egyptian Exchange analysis, valuation and education" % SITE_NAME,
+        "%s — Egyptian Exchange analysis and education" % SITE_NAME,
         DEFAULT_DESC,
         "<h1>Understand the Egyptian stock market before you invest in it</h1>"
         "<p>Free research covering every ordinary company listed on the Egyptian "
@@ -242,7 +290,7 @@ STATIC_ROUTES = {
         "historical returns after inflation, and how easily each share trades. "
         "Every figure is calculated from real filings and market data.</p>"),
     "/today": (
-        "The Egyptian market today — risers, fallers and breadth | " + SITE_NAME,
+        "Egyptian market today — risers, fallers, breadth",
         "How many EGX companies traded today, how many rose and fell, the "
         "biggest movers, and which sectors led. An index level cannot tell you "
         "how broad a move was.",
@@ -250,7 +298,7 @@ STATIC_ROUTES = {
         "<p>How many companies actually traded, how many rose, and where the "
         "money went. An index can rise on a day when most shares fall.</p>"),
     "/markets": (
-        "All Egyptian Exchange companies — prices and financials | " + SITE_NAME,
+        "All EGX companies — prices and financials",
         "Browse every ordinary company listed on the EGX with share price, "
         "market value, returns after inflation and how easily each one trades.",
         "<h1>All Egyptian Exchange companies</h1>"
@@ -258,7 +306,7 @@ STATIC_ROUTES = {
         "data-quality labels. Companies with incomplete data are kept in the "
         "list and marked, not hidden.</p>"),
     "/screener": (
-        "Egyptian stock screener — filter the EGX by value, quality and risk | " + SITE_NAME,
+        "Egyptian stock screener — filter the whole EGX",
         "Filter Egyptian Exchange companies by P/E, dividend yield, return on "
         "equity, growth, debt, volatility and how easily they trade.",
         "<h1>Egyptian stock screener</h1>"
@@ -266,13 +314,13 @@ STATIC_ROUTES = {
         "how easily a share actually trades. Missing data excludes a company "
         "rather than counting as zero.</p>"),
     "/compare": (
-        "Compare Egyptian companies side by side | " + SITE_NAME,
+        "Compare Egyptian companies side by side",
         "Put several Egyptian Exchange companies side by side on the same "
         "measures: valuation, profitability, growth, risk and liquidity.",
         "<h1>Compare Egyptian companies</h1>"
         "<p>Up to six companies on the same measures, calculated the same way.</p>"),
     "/scenario": (
-        "What if I had invested? Egyptian stock calculator | " + SITE_NAME,
+        "What if I had invested? EGX calculator",
         "See what an investment in any Egyptian company would actually have "
         "been worth, including dividends, dealing costs and inflation.",
         "<h1>What if I had invested?</h1>"
@@ -280,28 +328,28 @@ STATIC_ROUTES = {
         "to the money — with dividends reinvested, costs deducted and the "
         "result restated in today's purchasing power.</p>"),
     "/backtest": (
-        "Backtest a portfolio of Egyptian shares | " + SITE_NAME,
+        "Backtest an Egyptian share portfolio",
         "Test how a mix of Egyptian shares would have performed, with "
         "rebalancing and dealing costs, using real daily prices.",
         "<h1>Backtest a portfolio</h1>"
         "<p>Day-by-day, using real prices and real dividends, with no "
         "look-ahead.</p>"),
     "/forecast": (
-        "Future scenarios for Egyptian shares | " + SITE_NAME,
+        "Future scenarios for Egyptian shares",
         "Projections and Monte Carlo simulations for Egyptian investments — "
         "ranges and probabilities, never predictions.",
         "<h1>Future scenarios</h1>"
         "<p>What a set of stated assumptions implies, shown as a range. Not a "
         "forecast and not advice.</p>"),
     "/plan": (
-        "Forecast a portfolio of Egyptian shares | " + SITE_NAME,
+        "Forecast an Egyptian share portfolio",
         "Build a portfolio today and model how it might behave over one, three "
         "or five years, using each holding's own figures.",
         "<h1>Forecast a portfolio</h1>"
         "<p>Each holding gets its own expected return, built from what the "
         "company actually reports, with risk measured from real prices.</p>"),
     "/weekly": (
-        "This week on the Egyptian Exchange | " + SITE_NAME,
+        "This week on the Egyptian Exchange",
         "How the Egyptian Exchange moved this week: how many companies rose "
         "and fell, the largest moves among shares that actually trade, and "
         "upcoming ex-dividend dates. Not investment advice.",
@@ -312,7 +360,7 @@ STATIC_ROUTES = {
         "knows why. Subscribe by RSS at "
         "<a href=\"/feed.xml\">/feed.xml</a>; there is no mailing list.</p>"),
     "/paper": (
-        "Paper portfolio — track picks against the Egyptian market | " + SITE_NAME,
+        "Paper portfolio — track picks against the EGX",
         "Record what you would have bought and see how it did against the "
         "Egyptian Exchange and against inflation. No money, no account, no "
         "recommendations.",
@@ -321,14 +369,14 @@ STATIC_ROUTES = {
         "The comparison against the exchange as a whole is the point: making "
         "25% means nothing until you know the market made 40%.</p>"),
     "/portfolio": (
-        "Analyse an Egyptian share portfolio | " + SITE_NAME,
+        "Analyse an Egyptian share portfolio",
         "Check the concentration, sector exposure and risk of a portfolio of "
         "Egyptian shares.",
         "<h1>Analyse a portfolio</h1>"
         "<p>Concentration, sector exposure and how much diversification you "
         "are actually getting.</p>"),
     "/funds": (
-        "Egyptian investment funds — values, types and returns | " + SITE_NAME,
+        "Egyptian investment funds — values and returns",
         "Every Egyptian investment fund we can cover, with the value of one "
         "unit today, what it invests in, its risk level and its returns.",
         "<h1>Egyptian investment funds</h1>"
@@ -337,7 +385,7 @@ STATIC_ROUTES = {
         "money across many holdings, which is usually where a first-time "
         "investor should look before picking individual shares.</p>"),
     "/learn": (
-        "Learn investing — plain English, Egyptian examples | " + SITE_NAME,
+        "Learn investing — plain English, Egyptian examples",
         "What P/E, dividends, valuation and risk actually mean, explained "
         "plainly and using Egyptian companies as the examples.",
         "<h1>Learn investing</h1>"
@@ -358,6 +406,16 @@ STATIC_ROUTES = {
         "the figures on this site.",
         "<h1>How this site works out its numbers</h1>"
         "<p>Sources, assumptions, and what this site refuses to do.</p>"),
+    "/contact": (
+        "Contact and corrections",
+        "Report a data error, ask how a figure was calculated, or say what is "
+        "missing. One person runs this site and reads every message.",
+        "<h1>Contact and corrections</h1>"
+        "<p>This site publishes a page listing what is wrong with its own "
+        "data. That page is incomplete by definition — it can only show the "
+        "faults we already know how to detect. If you find one we have not, "
+        "telling us is the single most useful thing you can do here.</p>"
+        "<p>Email <a href=\"mailto:%s\">%s</a>.</p>" % (CONTACT_EMAIL, CONTACT_EMAIL)),
     "/terms": (
         "Terms of use and disclaimer | " + SITE_NAME,
         "This is a free research and education tool, not investment advice. "
@@ -371,8 +429,7 @@ STATIC_ROUTES = {
 def sector_page(sector: str, companies: list, site_url: str):
     """A destination for "Egyptian bank stocks" and the like."""
     n = len(companies)
-    title = "%s on the Egyptian Exchange — share prices and valuation | %s" % (
-        sector, SITE_NAME)
+    title = _fit_title("%s stocks on the Egyptian Exchange" % sector)
     description = ("All %d companies in the %s sector listed on the Egyptian "
                    "Exchange, with share prices, valuation ratios and returns "
                    "after inflation." % (n, sector.lower()))

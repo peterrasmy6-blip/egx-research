@@ -87,6 +87,25 @@ def main() -> int:
         if not os.path.isfile(os.path.join(SITE, "static", "chart.umd.min.js")):
             fail("the charting library is not bundled; charts would not draw")
 
+        # Stylesheets and fonts too. Google Fonts told a third party who was
+        # reading an Egyptian investing site on every page view, and put
+        # another company's server in front of the first paint. Now that the
+        # CSP forbids outside hosts entirely, a reintroduced <link> would not
+        # merely leak -- it would silently fail to load and the page would
+        # render in a fallback font nobody chose.
+        ext_css = [m for m in _re.findall(r'<link[^>]+href="([^"]+)"', html)
+                   if m.startswith(("http://", "https://", "//"))
+                   and "egx-research" not in m]
+        if ext_css:
+            fail("index.html loads a stylesheet or font from another origin, "
+                 "which the Content-Security-Policy now blocks: %s" % ext_css)
+        for weight in (400, 500, 600, 700):
+            f = os.path.join(SITE, "static", "fonts",
+                             "inter-latin-%d.woff2" % weight)
+            if not os.path.isfile(f):
+                fail("the %d-weight font is missing; text would fall back to "
+                     "a system font" % weight)
+
         # Returning visitors must not run yesterday's JavaScript against
         # today's data files.
         if "?v=" not in html:
