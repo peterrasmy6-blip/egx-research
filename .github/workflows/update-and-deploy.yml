@@ -64,7 +64,7 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Cheap pre-check: if today's close is already published, stop before
       # spending five minutes downloading prices we already have.
