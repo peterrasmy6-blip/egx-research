@@ -104,7 +104,7 @@ You need a free GitHub account. Everything else is already written.
 On the new empty repository page:
 
 1. Click **uploading an existing file**
-2. Open `C:\Users\peter.rizkallah_dubi\Desktop\Website`
+2. Open `C:\Users\<you>\Desktop\Website`
 3. Select and drag in these, **but not the `site` folder and not `data`**:
    - the `backend` folder
    - the `.github` folder
