@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EGX Research — Egyptian Exchange analysis, valuation and education</title>
+<meta name="description" content="Free research, valuation, historical scenarios and financial education for the Egyptian Exchange. Real data. Not investment advice.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Chart.js is served from this site rather than a public CDN. Two reasons:
+     a compromised CDN would execute with full access to the page, and this
+     project has already had one host turn out to be unreachable from Egypt --
+     if that happened to the CDN, every chart would silently fail to draw. -->
+<script src="static/chart.umd.min.js"></script>
+<link rel="stylesheet" href="static/app.css">
+<link rel="alternate" type="application/rss+xml" title="EGX Research — the week" href="/feed.xml">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="/" onclick="go('/')">
+      <span class="brand-mark">EGX</span>
+      <span class="brand-name">Research</span>
+    </a>
+
+    <div class="search-box">
+      <input id="search" type="text" autocomplete="off" spellcheck="false"
+             data-i18n-placeholder="search.placeholder"
+             placeholder="Search any Egyptian company — try CIB, Fawry, or bank">
+      <div id="results" class="results hidden"></div>
+    </div>
+
+    <div class="lang-switch" role="group" aria-label="Language / اللغة">
+      <button data-set-lang="en" onclick="setLang('en')">English</button>
+      <button data-set-lang="ar" onclick="setLang('ar')">العربية</button>
+    </div>
+
+    <div class="level-switch" role="group" aria-label="How much detail to show">
+      <button data-set-level="beginner" onclick="setReadingLevel('beginner')"
+              title="Fewer numbers, more explanation"
+              data-i18n="level.beginner">New to this</button>
+      <button data-set-level="normal" onclick="setReadingLevel('normal')"
+              title="The standard view" data-i18n="level.normal">Standard</button>
+      <button data-set-level="advanced" onclick="setReadingLevel('advanced')"
+              title="Everything, including the workings"
+              data-i18n="level.advanced">Detailed</button>
+    </div>
+
+    <button class="nav-toggle" onclick="document.body.classList.toggle('nav-open')"
+            aria-label="Menu">☰</button>
+  </div>
+  <nav class="mainnav">
+    <div class="wrap mainnav-inner">
+      <a href="/" onclick="go('/')" data-route="/" data-i18n="nav.home">Home</a>
+      <a href="/today" onclick="go('/today')" data-route="/today" data-i18n="nav.today">Today</a>
+      <a href="/markets" onclick="go('/markets')" data-route="/markets" data-i18n="nav.markets">Markets</a>
+      <a href="/funds" onclick="go('/funds')" data-route="/funds" data-i18n="nav.funds">Funds</a>
+      <a href="/screener" onclick="go('/screener')" data-route="/screener" data-i18n="nav.screener">Screener</a>
+      <a href="/compare" onclick="go('/compare')" data-route="/compare" data-i18n="nav.compare">Compare</a>
+      <a href="/scenario" onclick="go('/scenario')" data-route="/scenario" data-i18n="nav.scenario">What If?</a>
+      <a href="/backtest" onclick="go('/backtest')" data-route="/backtest" data-i18n="nav.backtest">Backtest</a>
+      <a href="/forecast" onclick="go('/forecast')" data-route="/forecast" data-i18n="nav.forecast">Future Scenarios</a>
+      <a href="/plan" onclick="go('/plan')" data-route="/plan" data-i18n="nav.plan">Forecast a Portfolio</a>
+      <a href="/weekly" onclick="go('/weekly')" data-route="/weekly" data-i18n="nav.weekly">This Week</a>
+      <a href="/paper" onclick="go('/paper')" data-route="/paper" data-i18n="nav.paper">Paper Portfolio</a>
+      <a href="/portfolio" onclick="go('/portfolio')" data-route="/portfolio" data-i18n="nav.portfolio">Portfolio</a>
+      <a href="/learn" onclick="go('/learn')" data-route="/learn" data-i18n="nav.learn">Learn</a>
+    </div>
+  </nav>
+</header>
+
+<div id="stale-banner" class="stale-banner hidden"></div>
+
+<main class="wrap" id="view"></main>
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="margin-bottom:10px">
+          <span class="brand-mark">EGX</span><span class="brand-name">Research</span>
+        </div>
+        <p class="muted" id="foot-status">Loading data status…</p>
+      </div>
+      <div>
+        <h4>What this is</h4>
+        <p>Free research, analysis, historical simulation and financial
+           education for the Egyptian Exchange. Every figure is calculated
+           from real market data and company filings.</p>
+      </div>
+      <div>
+        <h4>What this is not</h4>
+        <p id="foot-disclaimer">This platform does not provide personalised
+           investment advice, portfolio management, or guarantees of investment
+           returns. Historical performance and model-based scenarios do not
+           guarantee future results. Users are responsible for their own
+           investment decisions.</p>
+      </div>
+    </div>
+    <p class="foot-links">
+      <a href="/methodology" onclick="go('/methodology')">How the numbers are worked out</a>
+      <span>·</span>
+      <a href="/data-quality" onclick="go('/data-quality')">What is wrong with our data</a>
+      <span>·</span>
+      <a href="/terms" onclick="go('/terms')">Terms and disclaimer</a>
+      <span>·</span>
+      <a href="/learn" onclick="go('/learn')">Learn investing</a>
+    </p>
+    <p class="foot-note">Research. Understand. Decide.</p>
+  </div>
+</footer>
+
+<script src="static/engine.js"></script>
+<script src="static/forecast_local.js"></script>
+<script src="static/api.js"></script>
+<script src="static/picker.js"></script>
+<script src="static/i18n.js"></script>
+<script src="static/app.js"></script>
+<script src="static/views.js"></script>
+<script src="static/views2.js"></script>
+<script src="static/views3.js"></script>
+<script src="static/views4.js"></script>
+<script src="static/views5.js"></script>
+<script src="static/views6.js"></script>
+<script src="static/sharecard.js"></script>
+<script src="static/breadth.js"></script>
+<script src="static/peers.js"></script>
+<script src="static/paper.js"></script>
+<script src="static/weekly.js"></script>
+<script>boot();</script>
+</body>
+</html>

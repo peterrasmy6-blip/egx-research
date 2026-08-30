@@ -1,0 +1,232 @@
+# Automatic data refresh and deployment, as soon after the EGX close as possible.
+#
+# The Egyptian Exchange trades Sunday to Thursday and closes at 14:30 Cairo.
+# There is no way to know in advance exactly when the free data source publishes
+# a given day's closing prices, so instead of guessing one time this job tries
+# repeatedly, starting 15 minutes after the bell:
+#
+#     14:45  first attempt   (15 min after close)
+#     15:15  second attempt  (45 min)
+#     16:00  third attempt   (90 min)
+#     17:30  fourth attempt  (3 hours)
+#     20:00  last attempt    (5.5 hours)
+#
+# Whichever attempt first finds the real close publishes the site. Every later
+# attempt that day sees the data is already live and exits in seconds without
+# republishing. If the close never arrives (a public holiday), every attempt
+# skips quietly and the live site is left untouched.
+#
+# Egypt observes daylight saving (UTC+3 summer, UTC+2 winter) and GitHub's
+# scheduler only speaks UTC, so both offsets are scheduled. The extra runs cost
+# nothing: they exit immediately once the day's data is already published.
+
+name: Update EGX data and deploy
+
+on:
+  schedule:
+    # Summer, Egypt = UTC+3  -> subtract 3 from Cairo time
+    - cron: "45 11 * * 0-4"   # 14:45 Cairo
+    - cron: "15 12 * * 0-4"   # 15:15
+    - cron: "0 13 * * 0-4"    # 16:00
+    - cron: "30 14 * * 0-4"   # 17:30
+    - cron: "0 17 * * 0-4"    # 20:00
+    # Winter, Egypt = UTC+2  -> subtract 2
+    - cron: "45 12 * * 0-4"   # 14:45 Cairo
+    - cron: "15 13 * * 0-4"   # 15:15
+    - cron: "0 14 * * 0-4"    # 16:00
+    - cron: "30 15 * * 0-4"   # 17:30
+    - cron: "0 18 * * 0-4"    # 20:00
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Refresh depth"
+        required: false
+        default: daily
+        type: choice
+        options: [daily, weekly, full]
+      force_deploy:
+        description: "Publish even if nothing looks newer"
+        required: false
+        default: false
+        type: boolean
+
+# Never let two runs collide; a later attempt waits rather than racing.
+concurrency:
+  group: egx-data
+  cancel-in-progress: false
+
+env:
+  LIVE_STATUS_URL: https://egx-research.pages.dev/data/status.json
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheap pre-check: if today's close is already published, stop before
+      # spending five minutes downloading prices we already have.
+      - name: Is today's close already live?
+        id: precheck
+        run: |
+          python -m pip install --quiet curl_cffi
+          python - <<'EOF'
+          import json, os, sys
+          from datetime import datetime, timedelta, timezone
+          now = datetime.now(timezone.utc)
+          cairo = now + timedelta(hours=3 if 5 <= now.month <= 10 else 2)
+          today = cairo.date().isoformat()
+          live = None
+          try:
+              from curl_cffi import requests as cr
+              r = cr.Session(impersonate="chrome").get(os.environ["LIVE_STATUS_URL"], timeout=25)
+              live = r.json().get("latest_market_date") if r.status_code == 200 else None
+          except Exception as e:
+              print("could not read live site:", e)
+          print(f"Cairo now {cairo:%Y-%m-%d %H:%M} | live data date {live}")
+          done = (live == today)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"already_current={'true' if done else 'false'}\n")
+          if done:
+              print("Today's close is already published - nothing to do.")
+          EOF
+
+      - uses: actions/setup-python@v5
+        if: steps.precheck.outputs.already_current != 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        if: steps.precheck.outputs.already_current != 'true'
+        run: pip install -r requirements.txt
+
+      # Statements and the roster change rarely, so they refresh weekly rather
+      # than on every one of the day's attempts.
+      - name: Choose refresh depth
+        id: depth
+        if: steps.precheck.outputs.already_current != 'true'
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            if [ "$(date -u +%u)" = "7" ]; then MODE=weekly; else MODE=daily; fi
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Restore database from cache
+        if: steps.precheck.outputs.already_current != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/egx.db
+          key: egx-db-${{ github.run_id }}
+          restore-keys: egx-db-
+
+      - name: Decide effective mode
+        id: effective
+        if: steps.precheck.outputs.already_current != 'true'
+        run: |
+          MODE="${{ steps.depth.outputs.mode }}"
+          if [ ! -f data/egx.db ]; then
+            echo "No cached database - full rebuild required."
+            MODE=full
+          else
+            echo "Cached database restored ($(du -h data/egx.db | cut -f1))."
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh market data
+        if: steps.precheck.outputs.already_current != 'true'
+        run: |
+          if [ "${{ steps.effective.outputs.mode }}" = "full" ]; then
+            python backend/refresh_all.py
+          else
+            python backend/refresh_all.py --${{ steps.effective.outputs.mode }}
+          fi
+
+      - name: Run engine tests
+        if: steps.precheck.outputs.already_current != 'true'
+        run: |
+          python backend/tests/test_engine.py
+          python backend/tests/test_engines2.py
+          python backend/tests/test_universe.py
+
+      - name: Build the static site
+        if: steps.precheck.outputs.already_current != 'true'
+        run: python backend/export_static.py
+
+      - name: Regenerate the coverage report
+        if: steps.precheck.outputs.already_current != 'true'
+        run: python backend/build_reports.py
+
+      # Nothing is published unless the data passes every sanity check.
+      - name: Verify the build
+        if: steps.precheck.outputs.already_current != 'true'
+        run: python backend/verify_build.py
+
+      # Always cache the database, even when we decide not to publish -- the
+      # work of fetching is still worth keeping for the next attempt.
+      - name: Save database to cache
+        if: always() && steps.precheck.outputs.already_current != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/egx.db
+          key: egx-db-${{ github.run_id }}
+
+      - name: Is the new build worth publishing?
+        id: decide
+        if: steps.precheck.outputs.already_current != 'true'
+        run: |
+          set +e
+          python backend/decide_deploy.py
+          CODE=$?
+          set -e
+          if [ "${{ github.event.inputs.force_deploy }}" = "true" ]; then
+            echo "Forced by manual run."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [ $CODE -eq 0 ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [ $CODE -eq 2 ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.decide.outputs.publish == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=egx-research --commit-dirty=true
+
+      - name: Commit the refreshed coverage report
+        if: steps.decide.outputs.publish == 'true'
+        run: |
+          git config user.name  "egx-data-bot"
+          git config user.email "actions@github.com"
+          git add EGX_COVERAGE_REPORT.md || true
+          git diff --staged --quiet || git commit -m "Data refresh $(date -u +%Y-%m-%d)"
+          git push || true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### EGX data refresh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.precheck.outputs.already_current }}" = "true" ]; then
+            echo "Today's close was already published. Skipped early." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.decide.outputs.publish }}" = "true" ]; then
+            echo "**Published.**" >> $GITHUB_STEP_SUMMARY
+            python - <<'EOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          s = json.load(open("site/data/status.json"))
+          print(f"- Market data through **{s['latest_market_date']}**")
+          print(f"- {s['securities_listed']} listed securities")
+          print(f"- {s['securities_with_prices']} with prices, {s['securities_with_statements']} with statements")
+          print(f"- {s['price_rows']:,} price records")
+          EOF
+          else
+            echo "No newer session available. Live site left unchanged." >> $GITHUB_STEP_SUMMARY
+          fi

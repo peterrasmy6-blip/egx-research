@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.git/
+data/*.json
+data/*.log
+docs/
+*.md

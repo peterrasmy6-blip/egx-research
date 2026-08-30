@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "egx",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m","http.server","8200","--directory","site"],
+      "port": 8200
+    },
+    {
+      "name": "egx-tests",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m","http.server","8300","--directory","backend"],
+      "port": 8300
+    }
+  ]
+}

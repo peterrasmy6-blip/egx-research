@@ -1,0 +1,35 @@
+# Security and caching headers for Cloudflare Pages.
+#
+# The site holds no accounts, no personal data and no server, so the realistic
+# attack surface is small. These close what is left: they stop the page pulling
+# executable code from anywhere but itself, stop it being framed by another
+# site, and stop browsers guessing content types.
+#
+# script-src allows 'unsafe-inline' because the interface uses inline onclick
+# handlers throughout. That is a real weakening and worth removing later by
+# moving to attached event listeners -- but the important half still holds:
+# no script from any other origin can run, which is what protects against a
+# compromised third-party CDN.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Frame-Options: DENY
+
+# The data files change once a trading day. Cache them briefly and let the
+# browser revalidate, so a visitor never sees yesterday's close for long.
+/data/*
+  Cache-Control: public, max-age=900, must-revalidate
+
+# Code and fonts are replaced only on a deploy.
+/static/*
+  Cache-Control: public, max-age=3600
+
+# The weekly feed. `nosniff` above means the content type must be declared, or
+# a reader that fetches this gets it as text and shows the raw XML.
+/feed.xml
+  Content-Type: application/rss+xml; charset=utf-8
+  Cache-Control: public, max-age=900, must-revalidate
