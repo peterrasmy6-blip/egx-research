@@ -19,6 +19,7 @@ from app.engine import forecast as F
 from app.engine import screener as S
 from app.engine import fundamentals as FU
 from app.engine import metrics as M
+from app.engine import trading_days as TD
 from app.engine import digest as DG
 
 PASS = FAIL = 0
@@ -670,11 +671,19 @@ print("\n--- block bootstrap ---")
 import json as _json
 import random as _random
 
-_pts_path = Path(__file__).resolve().parents[2] / "site" / "data" / "composite.json"
-_hist = []
-if _pts_path.exists():
-    _hist = F.monthly_returns_from_series(
-        _json.loads(_pts_path.read_text(encoding="utf-8")).get("points", []))
+# Built from the database, not from site/data/composite.json.
+#
+# That file is a build output, and this suite runs BEFORE the build. On a
+# developer's machine a stale copy is always lying around so the test passed;
+# on a clean checkout there is no file, the series came back empty, and the
+# assertion failed for a reason that had nothing to do with the code under
+# test. A test must not depend on an artefact produced after it runs.
+from app.engine import composite as _CMP
+from datetime import timedelta as _td
+
+_hist = F.monthly_returns_from_series(
+    _CMP.build_composite(db, start=date.today() - _td(days=365 * 7 + 30))
+    .get("points", []))
 
 check("monthly returns are derived from a dated level series",
       len(_hist) > 40, "got %d" % len(_hist))
@@ -890,6 +899,56 @@ check("a week we cannot report produces a valid, empty feed rather than a "
       "fabricated one", empty_ok, empty[:200])
 
 db.close()
+# ------------------------------------------------- partial trading sessions
+#
+# The rule used to be a single ratio: of the securities that posted a bar,
+# what share actually traded. That is a ratio among the ones that reported,
+# so a day on which the source had published only seven companies -- all of
+# which had traded -- scored a perfect 1.00 and was accepted as the market's
+# latest session on the strength of seven names out of 269.
+#
+# The consequence was not cosmetic. The site announced that date as its data
+# date, the deploy job compared it against today, concluded the close was
+# already live, and skipped -- so the remaining companies were never fetched,
+# and the next run repeated the reasoning. A partial session that claims to be
+# a whole one keeps itself true.
+print("\n--- partial trading sessions ---")
+
+_NORMAL = 216.0
+
+check("seven companies out of 269 is not a finished session",
+      not TD.session_is_complete(7, 1.00, _NORMAL),
+      "this is the exact shape of the bug: a perfect ratio on almost no data")
+check("a normal session is accepted",
+      TD.session_is_complete(216, 0.91, _NORMAL))
+check("a slightly short session is still accepted",
+      TD.session_is_complete(150, 0.91, _NORMAL))
+check("a session missing most of the exchange is refused",
+      not TD.session_is_complete(100, 0.91, _NORMAL))
+check("a public holiday reported by the source is still refused",
+      not TD.session_is_complete(215, 0.01, _NORMAL),
+      "full coverage but nothing traded")
+check("with no history to compare against, coverage cannot be judged",
+      TD.session_is_complete(5, 1.00, 0.0))
+
+# The yardstick must be the middle of recent sessions, not the best of them:
+# one unusually complete day should not set a bar the others cannot clear.
+_rows = [{"bars": b, "traded": b, "share": 1.0} for b in
+         (210, 212, 216, 215, 214, 216, 260, 213, 215, 216)]
+_norm = TD.typical_bar_count(_rows)
+check("the yardstick is the middle session, not the largest",
+      210 <= _norm <= 220, "got %s" % _norm)
+
+# And the real database must not be reporting a partial day as its latest.
+_latest = TD.latest_session(db)
+_all = TD.analyse_dates(db)
+_bars_on_latest = next((r["bars"] for r in _all if r["date"] == _latest), 0)
+check("the database's latest session carries a full complement of companies",
+      _bars_on_latest >= TD.typical_bar_count(_all) * TD.MIN_SESSION_COVERAGE,
+      "%s carries %d bars against a normal %.0f"
+      % (_latest, _bars_on_latest, TD.typical_bar_count(_all)))
+
+
 print("\n" + "=" * 54)
 print("  %d passed, %d failed" % (PASS, FAIL))
 print("=" * 54)
