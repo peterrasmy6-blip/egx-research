@@ -118,7 +118,12 @@ def export_all(verbose: bool = True) -> dict:
                                                m.group(3)),
                    shell)
     # Cloudflare Pages reads these from the root of the published folder.
-    for extra in ("_headers",):
+    # Root-level assets: the Cloudflare headers file, plus the icons and the
+    # social card. The icons are committed rather than generated because the
+    # image library that made them is not a declared dependency and must not
+    # become one just to redraw an unchanging logo on every build.
+    for extra in ("_headers", "favicon.ico", "favicon.svg",
+                  "apple-touch-icon.png", "og.png"):
         src = os.path.join(WEB_SRC, extra)
         if os.path.exists(src):
             shutil.copy(src, os.path.join(OUT, extra))
@@ -268,7 +273,7 @@ def export_all(verbose: bool = True) -> dict:
         # Carried in status because the company page needs it and status is
         # already loaded on every page; repeating the wording in 371 company
         # files would be wasteful.
-        "inflation": inflation_mod.describe(db),
+        "inflation": inflation_mod.describe(db, with_points=True),
         # How much fund NAV history we have accumulated ourselves. No free
         # source publishes it, so this grows one day at a time.
         "funds_nav_days": db.scalar(
@@ -443,7 +448,7 @@ def export_all(verbose: bool = True) -> dict:
                             for k, v in FILTERABLE.items()],
         "screener_withheld": [{"field": k, "reason": v}
                               for k, v in WITHHELD_FROM_SCREENER.items()],
-        "inflation": inflation_mod.describe(db),
+        "inflation": inflation_mod.describe(db, with_points=True),
         # How much fund NAV history we have accumulated ourselves. No free
         # source publishes it, so this grows one day at a time.
         "funds_nav_days": db.scalar(

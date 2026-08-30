@@ -434,6 +434,24 @@ function pickerValue(id) {
   return PICKERS[id] ? PICKERS[id].value : null;
 }
 
+/**
+ * What to say when a search finds nothing.
+ *
+ * Typing an Arabic company name returned a bare "no match", which reads as
+ * "this company is not on the exchange" when the truth is that we hold company
+ * names in English only -- no free source publishes an Arabic roster we could
+ * rely on. On a site that serves an Arabic interface, letting that look like
+ * absence rather than a stated limitation is the wrong failure.
+ */
+function noMatchNote(q) {
+  const arabic = /[؀-ۿ]/.test(q);
+  if (arabic) {
+    return "أسماء الشركات محفوظة بالإنجليزية فقط، إذ لا يتيح أي مصدر مجاني قائمة عربية موثوقة. جرّب الاسم بالإنجليزية أو الرمز مثل COMI.";
+  }
+  return "No company matches “" + esc(q) + "”. Try a ticker (COMI), "
+       + "part of an English name, or a sector like “bank”.";
+}
+
 /* ---------------- search ---------------- */
 let searchTimer;
 function initSearch() {
@@ -452,7 +470,7 @@ function initSearch() {
               <span class="res-nm">${esc(r.name)}</span></span>
               <span class="res-r">${r.price != null ? egp2(r.price) : esc(r.sector || "")}</span>
              </div>`).join("")
-          : `<div class="res-item"><span class="muted">No company matches “${esc(q)}”.</span></div>`;
+          : `<div class="res-item"><span class="muted">${noMatchNote(q)}</span></div>`;
         box.classList.remove("hidden");
       } catch (err) {}
     }, 170);

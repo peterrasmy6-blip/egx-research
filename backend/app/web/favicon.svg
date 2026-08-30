@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EGX Research">
+  <rect width="64" height="64" rx="14" fill="#0f1723"/>
+  <!-- Three ascending bars: the smallest mark that still reads at 16px and
+       says "market" without a candlestick's fiddly wicks. -->
+  <rect x="14" y="36" width="9" height="15" rx="2.5" fill="#4a9c8c"/>
+  <rect x="27.5" y="26" width="9" height="25" rx="2.5" fill="#67c0ad"/>
+  <rect x="41" y="14" width="9" height="37" rx="2.5" fill="#9fe3d2"/>
+</svg>

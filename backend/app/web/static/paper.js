@@ -343,6 +343,11 @@ function paperCard(pf, v) {
       ${beat
         ? `<strong>${esc(t("paper.beat", "Ahead of the market."))}</strong> Over the same period the exchange as a whole returned ${pct(v.market_pct)}, so this selection added ${num(Math.abs(v.vs_market_pp), 1)} percentage points. Over a short period that is as likely to be luck as skill.`
         : `<strong>${esc(t("paper.behind", "Behind the market."))}</strong> The exchange as a whole returned ${pct(v.market_pct)} over the same period. Owning the whole market instead would have done ${num(Math.abs(v.vs_market_pp), 1)} percentage points better — which is the comparison most investors never make.`}
+      <p style="margin:8px 0 0;font-size:12.5px;color:var(--ink-3)">
+        ${esc(t("paper.bench.note",
+          "\"The market\" here is our own equal-weighted composite, not the EGX30 — no free source publishes the official index history. It holds only companies still listed today, so it is flattered by the ones that failed and left, which makes it a harder benchmark to beat than the real market was."))}
+        <a href="/markets" onclick="go('/markets');return false">${esc(t("paper.bench.link", "How it is built"))}</a>
+      </p>
     </div>` : ""}
 
     <div class="table-scroll"><table class="tbl">

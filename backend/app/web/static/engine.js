@@ -20,7 +20,79 @@
 const ENGINE = (() => {
   const TRADING_DAYS = 252;
   const DEFAULT_COST_RATE = 0.00175;
+  // Only a fallback now. The real consumer price index is used wherever it
+  // reaches; this is what remains for the years before it starts.
   const DEFAULT_INFLATION = 0.20;
+
+  /* ---------------- Egyptian consumer prices ----------------
+
+     These tools used to deflate by a flat assumed rate while the company
+     pages used the World Bank index, so the same holding period produced two
+     different real returns depending on which page you were standing on. This
+     is a port of the server-side calculation, deliberately line-for-line, so
+     the two agree rather than merely resemble each other. */
+
+  const _days = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
+
+  function cpiPoints() {
+    const i = (typeof STATUS !== "undefined" && STATUS && STATUS.inflation) || {};
+    return (i.available && Array.isArray(i.points)) ? i.points : null;
+  }
+
+  function cpiTrailingRate(pts) {
+    if (!pts || pts.length < 2) return DEFAULT_INFLATION;
+    const [d0, v0] = pts[pts.length - 2], [d1, v1] = pts[pts.length - 1];
+    if (v0 <= 0 || v1 <= 0) return DEFAULT_INFLATION;
+    const years = Math.max(0.5, _days(d0, d1) / 365.25);
+    return Math.pow(v1 / v0, 1 / years) - 1;
+  }
+
+  /** The price index on a day, interpolated geometrically: prices compound. */
+  function cpiIndexOn(pts, when) {
+    if (!pts || !pts.length) return null;
+    if (when <= pts[0][0]) return when === pts[0][0] ? pts[0][1] : null;
+    for (let i = 1; i < pts.length; i++) {
+      const [d0, v0] = pts[i - 1], [d1, v1] = pts[i];
+      if (when <= d1) {
+        const span = _days(d0, d1);
+        if (span <= 0 || v0 <= 0 || v1 <= 0) return v1;
+        return v0 * Math.pow(v1 / v0, _days(d0, when) / span);
+      }
+    }
+    const [dl, vl] = pts[pts.length - 1];
+    return vl * Math.pow(1 + cpiTrailingRate(pts), _days(dl, when) / 365.25);
+  }
+
+  /**
+   * Total price increase between two dates.
+   *
+   * Returns null when the index cannot reach the period, so the caller can
+   * fall back to a stated flat rate rather than quietly deflating by nothing.
+   */
+  function inflationBetween(start, end) {
+    const pts = cpiPoints();
+    if (!pts) return null;
+    const a = cpiIndexOn(pts, start), b = cpiIndexOn(pts, end);
+    if (!a || !b || a <= 0) return null;
+    return b / a - 1;
+  }
+
+  /**
+   * Total inflation over a period, preferring the measured index and falling
+   * back to a flat rate. `override` (a decimal rate) always wins, because the
+   * scenario pages let a reader supply their own assumption.
+   */
+  function totalInflation(start, end, override) {
+    const years = Math.max(0, _days(start, end) / 365.25);
+    if (override != null) return {
+      total: Math.pow(1 + override, years) - 1, basis: "flat", rate: override};
+    const measured = inflationBetween(start, end);
+    if (measured != null) return {
+      total: measured, basis: "cpi",
+      rate: years > 0 ? Math.pow(1 + measured, 1 / years) - 1 : null};
+    return {total: Math.pow(1 + DEFAULT_INFLATION, years) - 1,
+            basis: "assumed", rate: DEFAULT_INFLATION};
+  }
   const MAX_ENTRY_ROLL_DAYS = 14;
   const EGP_RISK_FREE = 0.205;
 
@@ -124,12 +196,27 @@ const ENGINE = (() => {
   const r2 = x => x == null ? null : Math.round(x * 100) / 100;
   const r4 = x => x == null ? null : Math.round(x * 10000) / 10000;
 
+  /** How the real figure was arrived at, stated rather than assumed. */
+  function inflationAssumptionLine(infl) {
+    const pct = infl.rate == null ? "?" : (infl.rate * 100).toFixed(1);
+    if (infl.basis === "cpi")
+      return `Purchasing power is measured against the World Bank's consumer `
+           + `price index for Egypt over exactly this period, which works out `
+           + `at ${pct}% a year. Between yearly readings the index is `
+           + `interpolated, and past the last reading the most recent rate is `
+           + `carried forward.`;
+    if (infl.basis === "flat")
+      return `Inflation set to ${pct}% a year, as you entered. This is your `
+           + `assumption, not measured data.`;
+    return `Inflation assumed at ${pct}% a year, because the price index does `
+         + `not reach back this far. This is an assumption, not measured data.`;
+  }
+
   /* ===================================================================== */
   /* Historical scenario: lump sum                                          */
   /* ===================================================================== */
   function lumpSum(co, amount, start, opts = {}) {
     const costRate = opts.cost_rate ?? DEFAULT_COST_RATE;
-    const inflation = opts.inflation_annual ?? DEFAULT_INFLATION;
     const reinvest = !!opts.reinvest_dividends;
 
     if (amount <= 0) throw new InsufficientData("Investment amount must be greater than zero.");
@@ -190,7 +277,10 @@ const ENGINE = (() => {
     const dd = maxDrawdown(closes);
     const vol = annualisedVolatility(dailyReturns(adj));
 
-    const inflFactor = years > 0 ? Math.pow(1 + inflation, years) : 1;
+    // Deflated by the measured Egyptian price index across exactly this
+    // holding period, not by a flat rate applied to every period alike.
+    const infl = totalInflation(d[ei], exitDate, opts.inflation_annual);
+    const inflFactor = 1 + infl.total;
     const realValue = finalValue / inflFactor;
     const realReturn = realValue / amount - 1;
     const cg = cagr(amount, finalValue, years);
@@ -211,8 +301,11 @@ const ENGINE = (() => {
       cagr_pct: cg == null ? null : r2(cg * 100),
       volatility_pct: vol ? r2(vol * 100) : null,
       max_drawdown_pct: dd ? r2(dd.max_drawdown * 100) : null,
-      inflation_assumption_pct: r2(inflation * 100),
+      inflation_assumption_pct: infl.rate == null ? null : r2(infl.rate * 100),
       real_value: r2(realValue), real_return_pct: r2(realReturn * 100),
+      inflation_basis: infl.basis,
+      inflation_total_pct: r2(infl.total * 100),
+      inflation_annualised_pct: infl.rate == null ? null : r2(infl.rate * 100),
       beat_inflation: realReturn > 0,
       assumptions: [
         `Bought at the closing price on ${entryDate}.`,
@@ -220,8 +313,7 @@ const ENGINE = (() => {
         `Dividends ${reinvest ? "reinvested at the closing price on the ex-date"
                               : "held as cash, not reinvested"}.`,
         "No tax has been applied.",
-        `Inflation assumed at ${(inflation * 100).toFixed(1)}% per year to show ` +
-        `purchasing power. This is an assumption, not measured data.`,
+        inflationAssumptionLine(infl),
       ],
     };
   }
@@ -231,7 +323,6 @@ const ENGINE = (() => {
   /* ===================================================================== */
   function monthlyPlan(co, monthlyAmount, start, opts = {}) {
     const costRate = opts.cost_rate ?? DEFAULT_COST_RATE;
-    const inflation = opts.inflation_annual ?? DEFAULT_INFLATION;
     const initial = opts.initial_amount || 0;
 
     if (monthlyAmount <= 0 && initial <= 0)
@@ -291,7 +382,8 @@ const ENGINE = (() => {
     const finalValue = marketValue + dividendCash;
     const profit = finalValue - contributed;
     const years = dayDiff(exitDate, d[fi]) / 365.25;
-    const inflFactor = years > 0 ? Math.pow(1 + inflation, years) : 1;
+    const infl = totalInflation(d[fi], exitDate, opts.inflation_annual);
+    const inflFactor = 1 + infl.total;
 
     return {
       type: "monthly_plan", ticker: co.ticker, name: co.name, currency: co.currency,
@@ -306,8 +398,11 @@ const ENGINE = (() => {
       profit: r2(profit),
       total_return_pct: contributed ? r2(profit / contributed * 100) : null,
       gain_from_contributions: r2(contributed), gain_from_returns: r2(profit),
-      inflation_assumption_pct: r2(inflation * 100),
+      inflation_assumption_pct: infl.rate == null ? null : r2(infl.rate * 100),
       real_value: r2(finalValue / inflFactor),
+      inflation_basis: infl.basis,
+      inflation_total_pct: r2(infl.total * 100),
+      inflation_annualised_pct: infl.rate == null ? null : r2(infl.rate * 100),
       purchases,
       assumptions: [
         `Bought once a month on (or just after) day ${Math.min(Number(start.split("-")[2]), 28)}.`,
@@ -316,6 +411,7 @@ const ENGINE = (() => {
         "No tax applied.",
         "Because money was added over time, a single annual growth rate is not " +
         "shown - each instalment was invested for a different length of time.",
+        inflationAssumptionLine(infl),
       ],
     };
   }

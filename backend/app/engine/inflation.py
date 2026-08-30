@@ -193,8 +193,15 @@ def real_return(nominal_pct: float | None, points, start: date,
     return ((1.0 + nominal_pct / 100.0) / (1.0 + infl) - 1.0) * 100.0
 
 
-def describe(db) -> dict:
-    """Everything the site needs to explain the figure and its limits."""
+def describe(db, *, with_points: bool = False) -> dict:
+    """
+    Everything the site needs to explain the figure and its limits.
+
+    `with_points` also returns the index itself. The browser needs it because
+    the historical scenario tools ran on a flat assumed rate while the company
+    pages used this series, so the same holding period produced two different
+    real returns depending on which page you were standing on.
+    """
     points = series(db)
     if not points:
         return {"available": False}
@@ -216,4 +223,6 @@ def describe(db) -> dict:
             "approximate over a few months."
             % (last_d.year, rate * 100)),
         "short_note": "adjusted for Egyptian inflation",
+        **({"points": [[d.isoformat(), v] for d, v in points],
+            "trailing_rate": rate} if with_points else {}),
     }

@@ -92,7 +92,18 @@ def render_shell(base_html: str, *, path: str, title: str, description: str,
         '<meta property="og:description" content="%s">' % esc(description),
         '<meta property="og:url" content="%s">' % esc(canonical),
         '<meta property="og:locale" content="en_EG">',
-        '<meta name="twitter:card" content="summary">',
+        # A shared link with no image is a grey box in WhatsApp and LinkedIn,
+        # which is most of how this site will actually travel.
+        '<meta property="og:image" content="%s">' % esc(
+            site_url.rstrip("/") + "/og.png"),
+        '<meta property="og:image:width" content="1200">',
+        '<meta property="og:image:height" content="630">',
+        '<meta property="og:image:alt" content="%s">' % esc(
+            "EGX Research — free analysis, valuation and financial "
+            "education for the Egyptian Exchange."),
+        '<meta name="twitter:card" content="summary_large_image">',
+        '<meta name="twitter:image" content="%s">' % esc(
+            site_url.rstrip("/") + "/og.png"),
         '<meta name="twitter:title" content="%s">' % esc(title),
         '<meta name="twitter:description" content="%s">' % esc(description),
     ]
