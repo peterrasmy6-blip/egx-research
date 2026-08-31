@@ -25,6 +25,9 @@ rather than silently offering tools that would produce nothing.
 """
 from __future__ import annotations
 
+import json
+import os
+
 import html
 import re
 
@@ -125,3 +128,53 @@ def ticker_for(slug: str) -> str:
     """
     clean = re.sub(r"[^A-Za-z0-9]+", "-", slug).strip("-").upper()
     return ("FUND-" + clean)[:60]
+
+
+# --------------------------------------------------------------------------
+SEED_PATH = os.path.join(os.path.dirname(__file__), "funds_seed.json")
+
+
+def load_seed() -> tuple[list[dict], str | None]:
+    """
+    The last roster we captured while the source was answering properly.
+
+    This exists because the source is free, scraped, and does not answer every
+    client alike: a GitHub runner received one fund where a home connection
+    receives forty. Without a fallback, a site that cannot reach it publishes
+    no Funds section at all -- forty real Egyptian funds vanish because of one
+    unlucky HTTP response.
+
+    The NAV in here is real and was true on the capture date. It is returned
+    with that date attached so the page can say "as of" rather than implying
+    it is today's, which is the only way stale data belongs on this site.
+    """
+    try:
+        with open(SEED_PATH, encoding="utf-8") as fh:
+            blob = json.load(fh)
+        return blob.get("funds", []), blob.get("captured_on")
+    except Exception:
+        return [], None
+
+
+def fetch_funds_or_seed(verbose: bool = True) -> tuple[list[dict], str | None]:
+    """
+    The live roster, or the captured one when the source cannot be reached.
+
+    Returns (rows, stale_since). `stale_since` is None when the data is live.
+    """
+    try:
+        rows = fetch_funds(verbose=verbose)
+        if len(rows) >= 10:
+            return rows, None
+        if verbose:
+            print("  fund source returned only %d funds; using the captured "
+                  "roster instead" % len(rows))
+    except Exception as e:
+        if verbose:
+            print("  fund source unreachable (%s); using the captured roster"
+                  % str(e)[:80])
+
+    rows, captured = load_seed()
+    if verbose and rows:
+        print("  captured roster: %d funds, NAV as of %s" % (len(rows), captured))
+    return rows, captured

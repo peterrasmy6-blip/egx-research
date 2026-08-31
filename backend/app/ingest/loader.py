@@ -219,6 +219,13 @@ def sync_universe(verbose: bool = True, use_cache: bool = False) -> dict:
             "delisted": [s.ticker for s in stale], "total": len(universe)}
 
 
+# A fetch smaller than this share of what we already hold, or below this
+# absolute floor, is treated as a broken response rather than a market event.
+# The source publishes about forty funds and they do not close in batches.
+FUND_ROSTER_SHARE = 0.60
+FUND_ROSTER_FLOOR = 10
+
+
 def sync_funds(verbose: bool = True) -> dict:
     """
     Load Egyptian investment funds.
@@ -232,18 +239,51 @@ def sync_funds(verbose: bool = True) -> dict:
     what-if calculator and Monte Carlo cannot run on them. Saying that plainly
     is better than offering a tool that would silently produce nothing.
     """
-    from .funds import fetch_funds, ticker_for, SOURCE_NAME
+    from .funds import fetch_funds_or_seed, ticker_for, SOURCE_NAME
 
     db = SessionLocal()
     started = datetime.utcnow()
     try:
-        rows = fetch_funds(verbose=verbose)
+        rows, stale_since = fetch_funds_or_seed(verbose=verbose)
     except Exception as e:
         _log(db, "sync_funds", None, "failed", 0, str(e), started)
         if verbose:
             print("  fund source failed: %s" % e)
         db.close()
         return {"added": 0, "updated": 0, "error": str(e)}
+
+    if not rows:
+        msg = "no funds from the source and no captured roster to fall back on"
+        _log(db, "sync_funds", None, "failed", 0, msg, started)
+        if verbose:
+            print("  " + msg)
+        db.close()
+        return {"added": 0, "updated": 0, "error": msg}
+
+    # Refuse a roster that has collapsed.
+    #
+    # Everything not in `rows` is marked closed below, so a half-delivered
+    # fetch does not merely miss funds -- it retires them. A GitHub runner got
+    # one fund where this machine gets forty, and that single response closed
+    # the other thirty-nine and emptied the Funds section. The source is free
+    # and scraped, and a datacentre IP is exactly the kind of client it may
+    # answer differently, so the roster shrinking is a fact about the request
+    # rather than about the market.
+    #
+    # discovery.py already refuses to shrink the share universe for the same
+    # reason. This is that guard, for funds.
+    held = db.scalar(select(func.count(Security.id)).where(
+        Security.asset_type == "fund",
+        Security.listing_status == "listed")) or 0
+    if held and len(rows) < max(FUND_ROSTER_FLOOR, held * FUND_ROSTER_SHARE):
+        msg = ("fund source returned %d funds against %d already held; "
+               "treating it as a failed fetch rather than closing %d funds"
+               % (len(rows), held, held - len(rows)))
+        _log(db, "sync_funds", None, "failed", 0, msg, started)
+        if verbose:
+            print("  " + msg)
+        db.close()
+        return {"added": 0, "updated": 0, "error": msg, "total": len(rows)}
 
     added = updated = 0
     seen = set()
@@ -300,9 +340,15 @@ def sync_funds(verbose: bool = True) -> dict:
         # It costs one row per fund per day.
         if f.get("nav") and f["nav"] > 0:
             today = date.today()
-            seen = db.scalar(select(Price).where(Price.security_id == sec.id,
-                                                 Price.d == today))
-            if seen is None:
+            # Named `existing`, not `seen`: `seen` is the set of tickers this
+            # run has processed, and assigning a database row to it here left
+            # the next iteration calling .add() on a row -- and left the
+            # "which funds disappeared" query below reading a Price instead of
+            # a set of tickers. The bug sat unexecuted because nothing ever
+            # called this function.
+            existing = db.scalar(select(Price).where(
+                Price.security_id == sec.id, Price.d == today))
+            if existing is None:
                 db.add(Price(security_id=sec.id, d=today,
                              open=None, high=None, low=None,
                              close=_px(f["nav"]), adj_close=_px(f["nav"]),
@@ -322,6 +368,19 @@ def sync_funds(verbose: bool = True) -> dict:
     if stale:
         db.commit()
 
+    # When the roster came from the capture rather than the live source, say so
+    # on the securities themselves. A NAV from another day is fine to show and
+    # not fine to present as today's.
+    if stale_since:
+        for sec in db.scalars(select(Security).where(
+                Security.asset_type == "fund",
+                Security.listing_status == "listed")).all():
+            sec.data_note = (
+                "The fund source could not be reached on this update, so this "
+                "net asset value is the last one we captured, on %s. It is not "
+                "today's." % stale_since)
+        db.commit()
+
     if verbose:
         print("  funds stored: %d new, %d updated, %d closed"
               % (added, updated, len(stale)))
@@ -329,7 +388,7 @@ def sync_funds(verbose: bool = True) -> dict:
          "added=%d updated=%d closed=%d" % (added, updated, len(stale)), started)
     db.close()
     return {"added": added, "updated": updated, "closed": len(stale),
-            "total": len(rows)}
+            "total": len(rows), "stale_since": stale_since}
 
 
 def ensure_retirement_reasons(db, verbose: bool = False) -> int:
