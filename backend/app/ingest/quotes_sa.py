@@ -48,7 +48,17 @@ from datetime import date
 from curl_cffi import requests as cr
 
 SOURCE_NAME = "stockanalysis-quote"
+# The same figure read while the exchange is still trading is not a closing
+# price, it is wherever the share happened to be at that moment. Both are
+# useful and they are not the same claim, so they are stored apart and the
+# page says which it is showing.
+SOURCE_NAME_INTRADAY = "stockanalysis-intraday"
 SOURCE_URL = "https://stockanalysis.com/list/egyptian-stock-exchange/"
+
+# The Egyptian Exchange trades Sunday to Thursday, 10:00 to 14:30 Cairo.
+SESSION_OPEN_HOUR = 10.0
+SESSION_CLOSE_HOUR = 14.5
+TRADING_WEEKDAYS = (6, 0, 1, 2, 3)          # Sun-Thu, Python numbering
 
 # The listing carries about 300 rows. Anything far below that is a broken or
 # partial response, and acting on it would spray wrong prices across the site.
@@ -56,6 +66,23 @@ MIN_ROWS = 150
 
 # A price outside this range is a parsing accident, not an Egyptian share.
 SANE_PRICE = (0.01, 100_000.0)
+
+
+
+def cairo_now():
+    """Cairo wall-clock. Egypt keeps DST: UTC+3 in summer, UTC+2 in winter."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    return now + timedelta(hours=3 if 5 <= now.month <= 10 else 2)
+
+
+def market_is_open(when=None) -> bool:
+    """Whether the exchange is trading at this moment."""
+    when = when or cairo_now()
+    if when.weekday() not in TRADING_WEEKDAYS:
+        return False
+    hour = when.hour + when.minute / 60.0
+    return SESSION_OPEN_HOUR <= hour < SESSION_CLOSE_HOUR
 
 
 def _session():
@@ -133,7 +160,12 @@ def sync_quotes_second_source(db, verbose: bool = True) -> dict:
             print("  second source unavailable: %s" % str(e)[:120])
         return {"available": False, "reason": str(e), "written": 0}
 
-    today = date.today()
+    now = cairo_now()
+    today = now.date()
+    intraday = market_is_open(now)
+    source = SOURCE_NAME_INTRADAY if intraday else SOURCE_NAME
+    if verbose and intraday:
+        print("  the exchange is open; these are intraday prices, not closes")
 
     # The newest genuine close we hold per security.
     newest = dict(db.execute(
@@ -156,16 +188,18 @@ def sync_quotes_second_source(db, verbose: bool = True) -> dict:
             continue
         row = db.scalar(select(Price).where(
             Price.security_id == sec.id, Price.d == today,
-            Price.source == SOURCE_NAME))
+            Price.source.in_((SOURCE_NAME, SOURCE_NAME_INTRADAY))))
         if row is None:
             db.add(Price(security_id=sec.id, d=today,
                          open=None, high=None, low=None,
                          close=price, adj_close=price,
                          volume=0, currency=sec.currency or "EGP",
-                         source=SOURCE_NAME))
+                         source=source))
         else:
             row.close = price
             row.adj_close = price
+            # A run after the close upgrades the morning's intraday row.
+            row.source = source
         written += 1
 
     db.commit()
@@ -173,5 +207,5 @@ def sync_quotes_second_source(db, verbose: bool = True) -> dict:
         print("  second-source prices: %d written, %d already current"
               % (written, skipped))
     return {"available": True, "written": written, "skipped": skipped,
-            "as_of": today.isoformat(), "source": SOURCE_NAME,
-            "quotes": len(quotes)}
+            "as_of": today.isoformat(), "source": source,
+            "intraday": intraday, "quotes": len(quotes)}

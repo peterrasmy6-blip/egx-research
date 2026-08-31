@@ -454,9 +454,12 @@ async function viewCompany(view, args) {
         <div class="t">as of ${esc(d.price_date || "—")}${
           q.is_stale ? " · not today's price" : ""}</div>
         ${d.price_is_quote && d.last_session && d.last_session !== d.price_date
-          ? `<div class="t" style="color:var(--warn)">quoted price · the last
-              full trading session we hold is ${esc(d.last_session)}, so the
-              returns and charts below end there</div>`
+          ? `<div class="t" style="color:var(--warn)">${
+              d.price_source === "stockanalysis-intraday"
+                ? "price while the market is open, not a close"
+                : "quoted price, not an official close"} · the last full
+              trading session we hold is ${esc(d.last_session)}, so the returns
+              and charts below end there</div>`
           : ""}
       </div>
     </div>
