@@ -451,7 +451,13 @@ async function viewCompany(view, args) {
       <div class="px">
         <div class="p">${price(d.price)}</div>
         <div class="d ${cls(d.day_change_pct)}">${pct(d.day_change_pct)}</div>
-        <div class="t">as of ${esc(d.price_date || "—")}${q.is_stale ? " · not today's price" : ""}</div>
+        <div class="t">as of ${esc(d.price_date || "—")}${
+          q.is_stale ? " · not today's price" : ""}</div>
+        ${d.price_is_quote && d.last_session && d.last_session !== d.price_date
+          ? `<div class="t" style="color:var(--warn)">quoted price · the last
+              full trading session we hold is ${esc(d.last_session)}, so the
+              returns and charts below end there</div>`
+          : ""}
       </div>
     </div>
 

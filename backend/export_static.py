@@ -37,7 +37,7 @@ from sqlalchemy import select, func
 
 from app.db import SessionLocal
 from app.models import (Security, Price, Dividend, FinancialFact,
-                        SecurityMetrics, IngestRun, FundProfile)
+                        SecurityMetrics, IngestRun, FundProfile, NON_TRADED_SOURCES)
 from app.engine import liquidity as liquidity_mod
 from app.engine import inflation as inflation_mod
 from app.engine import integrity as integrity_mod
@@ -224,6 +224,7 @@ def export_all(verbose: bool = True) -> dict:
     from app.engine.trading_days import latest_session, purge_phantom_dates
     purge_phantom_dates(db, verbose=False)
     newest = latest_session(db) or db.scalar(select(func.max(Price.d)))
+    last_full_session = newest
     quality = dict(db.execute(select(Security.data_quality, func.count(Security.id))
                               .group_by(Security.data_quality)).all())
     built = date.today()
@@ -529,6 +530,15 @@ def export_all(verbose: bool = True) -> dict:
             "currency": s.currency,
             "price": _round(m.price if m else (last.close if last else None), 4),
             "price_date": last.d.isoformat() if last else None,
+            # Where this particular price came from. When the primary source
+            # falls behind, the figure at the top of the page is a quote from
+            # the second source and the history below it still ends earlier.
+            # Showing one date for both would quietly merge two different
+            # things.
+            "price_is_quote": bool(last and last.source in NON_TRADED_SOURCES),
+            "price_source": (last.source if last else None),
+            "last_session": (last_full_session.isoformat()
+                             if last_full_session else None),
             "day_change_pct": m.day_change_pct if m else None,
             "market_cap": _round(m.market_cap, 0) if m else None,
             "shares_outstanding": _round(m.shares, 0) if m else None,

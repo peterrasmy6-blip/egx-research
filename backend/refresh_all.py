@@ -138,6 +138,24 @@ def main(mode: str = "full") -> None:
     # The source emits carried-forward, zero-volume bars on Egyptian public
     # holidays. Left in, they make the site claim the market traded on a day it
     # was closed. Removed before anything is calculated from them.
+    # A second source for the current price.
+    #
+    # The primary source went silent after 26 August 2026 -- every Egyptian
+    # company at once -- and the whole site froze on that date with no way for
+    # a reader to tell the market from the plumbing. This only fills the price
+    # at the top of a page, and only for companies whose history has fallen
+    # behind; it writes no volume and creates no session, so nothing measured
+    # from history is touched by it.
+    print("=== SECOND-SOURCE PRICES ===", flush=True)
+    from app.ingest.quotes_sa import sync_quotes_second_source
+    _q_db = SessionLocal()
+    try:
+        sync_quotes_second_source(_q_db, verbose=True)
+    except Exception as _e:                                     # noqa: BLE001
+        print("  second source failed: %s" % str(_e)[:120], flush=True)
+    finally:
+        _q_db.close()
+
     print("=== TRADING DAYS ===", flush=True)
     purge_phantom_dates(db, verbose=True)
 

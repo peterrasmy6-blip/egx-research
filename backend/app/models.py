@@ -314,7 +314,14 @@ class SecurityMetrics(Base):
 # real information -- a live quote, a fund's published value -- but they are not
 # a session, and every calculation that counts sessions or measures liquidity
 # must leave them out.
-NON_TRADED_SOURCES = ("yahoo-isin-quote", "egx-research-nav")
+# Sources that give a price but not a session: no volume, no open/high/low.
+# Everything here is excluded from the trading-day calendar, from liquidity
+# (which reads a zero volume as a dead stock) and from returns and volatility,
+# which must run on real closes. They exist so the price at the top of a page
+# can be current while everything measured from history still stops where the
+# history stops.
+NON_TRADED_SOURCES = ("yahoo-isin-quote", "egx-research-nav",
+                      "stockanalysis-quote")
 
 
 class MacroSeries(Base):
