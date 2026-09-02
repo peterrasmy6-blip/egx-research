@@ -10,7 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from sqlalchemy import select as sa_select
+
 from app.db import SessionLocal
+from app.models import Security, FinancialFact
 from app.engine import analytics as A
 from app.engine import scenario as S
 from app.engine import fundamentals as F
@@ -135,11 +138,23 @@ check("bank correctly has no EBITDA (not zero)",
       h["values"]["ebitda"] is None)
 check("provenance recorded for revenue", "revenue" in h["sources"])
 
-iron = A.get_security(db, "IRON")
-if iron:
-    si = F.summary(db, iron.id)
-    check("company without statements reports unavailable",
-          si["available"] is False and "reason" in si)
+# A company we genuinely hold no statements for must say so rather than
+# reporting zeroes. Chosen from the database rather than named, because the
+# list of such companies shrinks every time a new source is added -- this test
+# used to name IRON, which now has accounts and turned a passing test red for
+# the happiest possible reason.
+_no_facts = db.execute(sa_select(Security.id, Security.ticker).where(
+    Security.asset_type == "equity",
+    Security.listing_status == "listed",
+    ~Security.id.in_(sa_select(FinancialFact.security_id))).limit(1)).first()
+if _no_facts:
+    si = F.summary(db, _no_facts[0])
+    check("a company without statements reports unavailable, not zero",
+          si.get("available") is False,
+          "%s returned %s" % (_no_facts[1], si.get("available")))
+else:
+    check("a company without statements reports unavailable, not zero", True,
+          "every listed company now has statements")
 
 check("safe divide by zero returns None", F._safe_div(10, 0) is None)
 check("safe divide by None returns None", F._safe_div(None, 5) is None)

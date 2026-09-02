@@ -127,6 +127,29 @@ def main(mode: str = "full") -> None:
 
     db = SessionLocal()
 
+    # Statements from the second source, for the companies the first skips.
+    #
+    # Only on a full refresh: it is one page-load per company per statement,
+    # and the companies it serves are precisely those whose accounts the
+    # primary source has never carried, so a day's delay costs nothing. It
+    # never touches a company that already has statements, so it cannot alter
+    # a figure that was already being published.
+    if mode == "full":
+        print("=== SECOND-SOURCE STATEMENTS ===", flush=True)
+        from app.ingest.financials_sa import sync_financials_second_source
+        _f_db = SessionLocal()
+        try:
+            fr = sync_financials_second_source(_f_db, only_missing=True,
+                                               verbose=False)
+            print("  %d companies filled, %d facts, %d without usable data"
+                  % (fr["companies_filled"], fr["facts_written"],
+                     fr["skipped"]), flush=True)
+        except Exception as _e:                                 # noqa: BLE001
+            print("  second-source statements failed: %s" % str(_e)[:120],
+                  flush=True)
+        finally:
+            _f_db.close()
+
     # Consumer prices, so every multi-year return can also be shown in what the
     # money actually buys. Refreshed weekly -- the series is annual, so a daily
     # call would be pointless traffic. A failure here is not fatal: the stored

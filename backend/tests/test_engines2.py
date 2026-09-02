@@ -12,6 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import SessionLocal
+from datetime import date as _date_cls
+
+def _d(y, m, dd):
+    return _date_cls(y, m, dd)
+
 from app.engine import analytics as A
 from app.engine import valuation as V
 from app.engine import portfolio as P
@@ -947,6 +952,96 @@ check("the database's latest session carries a full complement of companies",
       _bars_on_latest >= TD.typical_bar_count(_all) * TD.MIN_SESSION_COVERAGE,
       "%s carries %d bars against a normal %.0f"
       % (_latest, _bars_on_latest, TD.typical_bar_count(_all)))
+
+
+# ---------------------------------------------- second-source statements
+#
+# Every check here is a trap this parser actually fell into while it was being
+# written. A page is not a table: it carries several, with different columns,
+# alongside a segment breakdown and a summary, and every one of those is a way
+# to file a number under a period the company never reported.
+print(chr(10) + "--- second-source statements ---")
+
+from app.ingest import financials_sa as SA
+from app.engine import fundamentals as FUND
+
+_PAGE = """
+<table>
+<tr><th>Fiscal Year</th><th>TTM</th><th>FY 2025</th><th>FY 2024</th></tr>
+<tr><th>Period Ending</th><td>Jun '26 Jun 30, 2026</td><td>Dec '25 Dec 31, 2025</td><td>Dec '24 Dec 31, 2024</td></tr>
+<tr><td>Revenue  Revenue Growth</td><td>33,497</td><td>29,984</td><td>24,303</td></tr>
+<tr><td>Revenue Growth</td><td>24.08%</td><td>23.38%</td><td>56.43%</td></tr>
+<tr><td>Net Income  Net Income Growth</td><td>2,233</td><td>1,632</td><td>2,735</td></tr>
+<tr><td>Earnings Per Share  EPS Growth</td><td>1.52</td><td>1.11</td><td>1.86</td></tr>
+</table>
+<table>
+<tr><th>Fiscal Year</th><th>Current</th><th>FY 2025</th><th>FY 2024</th></tr>
+<tr><th>Period Ending</th><td>Sep '26 Sep 2, 2026</td><td>Dec '25 Dec 31, 2025</td><td>Dec '24 Dec 31, 2024</td></tr>
+<tr><td>Total Debt</td><td>7,900</td><td>7,261</td><td>3,911</td></tr>
+<tr><td>Dairy Sector</td><td>100</td><td>90</td><td>80</td></tr>
+</table>
+"""
+
+_parsed = SA.parse_statement(_PAGE)
+
+check("a line item is read from the page",
+      _parsed.get("Revenue", {}).get(_d(2025, 12, 31)) == 29984.0,
+      "got %s" % _parsed.get("Revenue"))
+check("the growth row underneath it is not mistaken for a figure",
+      "Revenue Growth" not in _parsed)
+check("a repeated label is collapsed to the line item's own name",
+      "Net Income" in _parsed and "Net Income Net Income" not in _parsed)
+check("a trailing acronym is not kept as part of the name",
+      "Earnings Per Share" in _parsed, "got %s" % sorted(_parsed)[:5])
+
+# The two columns that are not fiscal years.
+_dates = {d for vals in _parsed.values() for d in vals}
+check("the trailing-twelve-months column is not filed as a year",
+      _d(2026, 6, 30) not in _dates)
+check("nor is the column showing today's snapshot",
+      not any(d.year == 2026 and d.month == 9 for d in _dates),
+      "dates %s" % sorted(str(d) for d in _dates))
+check("every stored period ends on a real reporting date",
+      all(d.month in (3, 6, 9, 12) for d in _dates),
+      "dates %s" % sorted(str(d) for d in _dates))
+
+# A second table has its own columns; its header must not overwrite the first.
+check("a later table's columns do not shift an earlier table's figures",
+      _parsed.get("Total Debt", {}).get(_d(2025, 12, 31)) == 7261.0,
+      "got %s" % _parsed.get("Total Debt"))
+
+check("rows that are not financial statement lines are ignored",
+      "Dairy Sector" not in SA.WANTED["balance"]
+      and "Dairy Sector" not in SA.WANTED["income"])
+
+# Units. The page is in millions; per-share figures are not.
+check("a reported figure is stored in pounds, not millions",
+      SA.UNIT_MILLIONS == 1_000_000.0)
+check("earnings per share is left unscaled",
+      "Earnings Per Share" in SA.PER_SHARE_ITEMS)
+check("...and so is the dividend per share",
+      "Dividend Per Share" in SA.PER_SHARE_ITEMS)
+check("but a share COUNT is scaled, because the page quotes it in millions too",
+      "Total Common Shares Outstanding" not in SA.PER_SHARE_ITEMS)
+
+check("the cash flow statement's profit is stored under its own name",
+      SA.CASHFLOW_RENAMES.get("Net Income") == "Net Income (cash flow)")
+check("...so it cannot overwrite the income statement's",
+      SA.CASHFLOW_RENAMES["Net Income"] != "Net Income")
+
+check("a page in another currency is refused rather than read as pounds",
+      SA._check_page("Currency is USD") == "USD"
+      and SA.EXPECTED_CURRENCY == "EGP")
+
+# Both vocabularies must resolve, or the companies this rescues stay unreadable.
+for _canon, _label in [("revenue", "Revenue"),
+                       ("total_equity", "Shareholders' Equity"),
+                       ("cash", "Cash & Equivalents"),
+                       ("capex", "Capital Expenditures"),
+                       ("shares", "Total Common Shares Outstanding")]:
+    check("the engine understands the second source's name for %s" % _canon,
+          _label in FUND.ALIASES[_canon],
+          "aliases %s" % FUND.ALIASES[_canon])
 
 
 print("\n" + "=" * 54)

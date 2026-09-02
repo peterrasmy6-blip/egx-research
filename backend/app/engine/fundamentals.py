@@ -18,9 +18,17 @@ from sqlalchemy import select
 from ..models import FinancialFact
 
 # Concept -> candidate line-item names, best first.
+# Two sources, two vocabularies.
+#
+# The primary source names a line "Total Revenue" and "Stockholders Equity";
+# the second names the same line "Revenue" and "Shareholders' Equity". Both
+# appear here so a company is read the same way whichever source supplied it,
+# and so the 181 companies the first source skips are not left unreadable
+# purely over spelling.
 ALIASES = {
-    "revenue": ["Total Revenue", "Operating Revenue", "Total Interest Income",
-                "Interest Income", "Net Interest Income"],
+    "revenue": ["Total Revenue", "Operating Revenue", "Revenue",
+                "Total Interest Income", "Interest Income",
+                "Net Interest Income"],
     # Order matters: the first alias present wins.
     #
     # "Net Income Common Stockholders" must come first because it is the
@@ -35,18 +43,24 @@ ALIASES = {
                    "Net Income From Continuing Operation Net Minority Interest",
                    "Net Income", "Net Income Continuous Operations"],
     "gross_profit": ["Gross Profit"],
-    "operating_income": ["Operating Income", "EBIT", "Total Operating Income As Reported"],
+    "operating_income": ["Operating Income", "EBIT",
+                         "Total Operating Income As Reported"],
     "ebitda": ["EBITDA", "Normalized EBITDA"],
     "pretax_income": ["Pretax Income"],
     "total_assets": ["Total Assets"],
-    "total_equity": ["Stockholders Equity", "Total Equity Gross Minority Interest",
+    "total_equity": ["Stockholders Equity", "Shareholders' Equity",
+                     "Total Common Equity",
+                     "Total Equity Gross Minority Interest",
                      "Common Stock Equity"],
     "total_debt": ["Total Debt", "Long Term Debt And Capital Lease Obligation"],
-    "cash": ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
+    "cash": ["Cash And Cash Equivalents", "Cash & Equivalents",
+             "Cash Cash Equivalents And Short Term Investments",
+             "Cash & Short-Term Investments"],
     "operating_cf": ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"],
-    "capex": ["Capital Expenditure"],
+    "capex": ["Capital Expenditure", "Capital Expenditures"],
     "free_cash_flow": ["Free Cash Flow"],
-    "shares": ["Diluted Average Shares", "Basic Average Shares", "Ordinary Shares Number"],
+    "shares": ["Diluted Average Shares", "Basic Average Shares",
+               "Ordinary Shares Number", "Total Common Shares Outstanding"],
 }
 
 
