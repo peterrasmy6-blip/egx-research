@@ -21,9 +21,19 @@ from ..models import FinancialFact
 ALIASES = {
     "revenue": ["Total Revenue", "Operating Revenue", "Total Interest Income",
                 "Interest Income", "Net Interest Income"],
-    "net_income": ["Net Income", "Net Income Common Stockholders",
-                   "Net Income Continuous Operations",
-                   "Net Income From Continuing Operation Net Minority Interest"],
+    # Order matters: the first alias present wins.
+    #
+    # "Net Income Common Stockholders" must come first because it is the
+    # profit that belongs to this company's own shareholders. Plain "Net
+    # Income" from this source includes the share owned by outside investors
+    # in subsidiaries, and using it overstates every per-share figure built on
+    # top: earnings per share, return on equity, the earnings yield, and the
+    # profit a valuation discounts. CIB's 2025 profit read 82,239m against the
+    # 61,634m actually attributable to its shareholders -- a third too high --
+    # and a second source agrees to the pound with the narrower figure.
+    "net_income": ["Net Income Common Stockholders",
+                   "Net Income From Continuing Operation Net Minority Interest",
+                   "Net Income", "Net Income Continuous Operations"],
     "gross_profit": ["Gross Profit"],
     "operating_income": ["Operating Income", "EBIT", "Total Operating Income As Reported"],
     "ebitda": ["EBITDA", "Normalized EBITDA"],

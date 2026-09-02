@@ -146,6 +146,33 @@ check("safe divide by None returns None", F._safe_div(None, 5) is None)
 
 db.close()
 print("\n" + "=" * 52)
+
+# --- whose profit is it? ---------------------------------------------------
+#
+# The source publishes several figures called some variant of "net income".
+# Plain "Net Income" includes the share owned by outside investors in
+# subsidiaries; "Net Income Common Stockholders" is what belongs to this
+# company's own shareholders. Every per-share number on this site rests on the
+# second: earnings per share, return on equity, the earnings yield, and the
+# profit a valuation discounts.
+#
+# The alias list had the wrong one first, so CIB's 2025 profit read 82,239m
+# against the 61,634m actually attributable to its shareholders -- a third too
+# high, carried into its P/E and its return on equity. A second source,
+# stockanalysis.com, agrees with the narrower figure to the pound.
+print(chr(10) + "--- net income belongs to shareholders ---")
+
+_ni = F.ALIASES["net_income"]
+check("the shareholders' figure is preferred over the consolidated one",
+      _ni.index("Net Income Common Stockholders") < _ni.index("Net Income"),
+      "order is %s" % _ni)
+check("...and over the figure that keeps minority interests",
+      _ni.index("Net Income Common Stockholders")
+      < _ni.index("Net Income Continuous Operations"),
+      "order is %s" % _ni)
+
+
+
 print("  %d passed, %d failed" % (PASS, FAIL))
 print("=" * 52)
 sys.exit(1 if FAIL else 0)
