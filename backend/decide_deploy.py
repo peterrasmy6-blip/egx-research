@@ -54,17 +54,27 @@ def cairo_now() -> datetime:
     return now + timedelta(hours=offset)
 
 
-def fetch_live_date() -> str | None:
-    """The market date the currently published site is showing."""
+def fetch_live_dates() -> tuple[str | None, str | None]:
+    """
+    What the published site is showing: (last full session, newest price).
+
+    Both matter. While the primary source is behind, the session date sits
+    still for days while quoted prices move every day, and a decision made on
+    the session date alone concludes there is nothing to publish -- which is
+    how a site with current prices stayed frozen on a four-day-old figure
+    through ten successful runs in one afternoon.
+    """
     try:
         from curl_cffi import requests as cr
         r = cr.Session(impersonate="chrome").get(LIVE_URL, timeout=25)
         if r.status_code != 200:
-            return None
-        return r.json().get("latest_market_date")
+            return None, None
+        blob = r.json()
+        return (blob.get("latest_market_date"),
+                blob.get("latest_price_date") or blob.get("latest_market_date"))
     except Exception as e:
         print("  could not read the live site (%s: %s)" % (type(e).__name__, e))
-        return None
+        return None, None
 
 
 def main() -> int:
@@ -83,12 +93,21 @@ def main() -> int:
     print("  Cairo time now      : %s" % now.strftime("%Y-%m-%d %H:%M"))
     print("  built site data date: %s" % built_date)
 
-    live_date = fetch_live_date()
+    built_price = built.get("latest_price_date") or built_date
+    live_date, live_price = fetch_live_dates()
     print("  live site data date : %s" % (live_date or "unknown"))
+    print("  built newest price  : %s" % built_price)
+    print("  live newest price   : %s" % (live_price or "unknown"))
+
+    # What actually decides it: has EITHER the last full session or the newest
+    # price we hold moved past what is already public? Comparing only the
+    # session date meant a day of fresh quoted prices counted as no change.
+    built_stamp = max(built_date, built_price)
+    live_stamp = max(live_date, live_price) if live_date and live_price else None
 
     # Nothing newer than what is already public.
-    if live_date and built_date <= live_date:
-        if built_date == today:
+    if live_stamp and built_stamp <= live_stamp:
+        if built_stamp == today:
             print("\nSKIP  today's close is already published. Nothing to do.")
         else:
             print("\nSKIP  no newer session available yet "
@@ -100,7 +119,7 @@ def main() -> int:
     # has actually shut. Because both daylight-saving offsets are scheduled,
     # some attempts land mid-session; a bar fetched then would be a partial
     # day's trading, and publishing it as "the close" would be wrong.
-    if built_date == today:
+    if built_stamp == today:
         minutes = now.hour * 60 + now.minute
         if minutes < MARKET_CLOSE_MINUTES + SETTLE_MINUTES:
             print("\nSKIP  the data is dated today, but Cairo time is %s and the "
@@ -113,7 +132,7 @@ def main() -> int:
         print("\nPUBLISH  today's closing prices have arrived.")
     else:
         print("\nPUBLISH  newer data than what is live (%s -> %s)."
-              % (live_date or "unknown", built_date))
+              % (live_stamp or "unknown", built_stamp))
     return PUBLISH
 
 

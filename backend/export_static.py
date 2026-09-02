@@ -293,6 +293,16 @@ def export_all(verbose: bool = True) -> dict:
         "dividend_rows": db.scalar(select(func.count(Dividend.id))),
         "statement_facts": db.scalar(select(func.count(FinancialFact.id))),
         "latest_market_date": newest.isoformat() if newest else None,
+        # The newest price of any kind we hold, including second-source quotes.
+        #
+        # Distinct from latest_market_date, which is the last COMPLETE trading
+        # session. While the primary source is behind, quotes move daily and
+        # the session date does not -- and the publish decision compared only
+        # the session date, so a site with fresh prices was judged to have
+        # nothing new and never republished.
+        "latest_price_date": (
+            db.scalar(select(func.max(Price.d))).isoformat()
+            if db.scalar(select(func.max(Price.d))) else None),
         "data_quality_breakdown": quality,
         "built_on": built.isoformat(),
         "sources": ["Yahoo Finance (prices, dividends, financial statements)",
