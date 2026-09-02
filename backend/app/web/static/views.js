@@ -515,7 +515,7 @@ async function viewCompany(view, args) {
       inflate the volatility figure and could set a false 52-week high or low.
       Dates removed: ${q.bad_prints.map(b => esc(b.date)).join(", ")}.</div>` : ""}
 
-    ${d.fund ? `<div class="card">
+    ${d.fund ? `<div class="card" id="sec-fund">
       <div class="card-head"><h2>Fund details</h2>
         <p class="sub">Published by ${esc(d.data_quality.source)}.</p></div>
       <div class="stats">
@@ -574,6 +574,8 @@ async function viewCompany(view, args) {
         52-week range: ${price(d.low_52w)} – ${price(d.high_52w)}</p>` : ""}
     </div>`}
 
+    ${d.asset_type === "fund" ? "" : riskPanel(d)}
+
     <div class="card" id="sec-numbers">
       <div class="card-head"><h2>${esc(t("co.keynumbers", "Key numbers"))}</h2>
         <p class="sub">Calculated from this company's own filings${q.latest_statement ? ` (latest: ${esc(q.latest_statement)})` : ""}.</p></div>
@@ -620,7 +622,7 @@ async function viewCompany(view, args) {
       <div id="val-body"><p class="muted">Calculating…</p></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec-financials">
       <div class="card-head"><h2>Financial history</h2>
         <p class="sub">Straight from the annual statements.</p></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -636,13 +638,13 @@ async function viewCompany(view, args) {
       <div id="fin-body" style="margin-top:14px"><p class="muted">Loading…</p></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec-dividends">
       <div class="card-head"><h2>Dividends</h2>
         <p class="sub">Cash paid per share, by ex-dividend date.</p></div>
       <div id="div-body"><p class="muted">Loading…</p></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="sec-tools">
       <div class="card-head"><h2>Try this company in the tools</h2></div>
       <div class="chips">
         <button class="chip" onclick="go('/scenario/${esc(d.ticker)}')">What if I had invested?</button>
@@ -652,6 +654,11 @@ async function viewCompany(view, args) {
     </div>
 
     <p class="disclaim">${esc(d.disclaimer)}</p>`;
+
+  // Group the cards into tabs. Done after rendering, so every element keeps
+  // the node it was drawn into and the code below that fills charts and
+  // tables by id needs no knowledge of the tabs at all.
+  groupIntoTabs(view, COMPANY_TABS, "co-" + d.ticker);
 
   document.querySelectorAll("#co-ranges .range").forEach(b => b.onclick = () => {
     document.querySelectorAll("#co-ranges .range").forEach(x => x.classList.remove("on"));

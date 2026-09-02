@@ -92,7 +92,7 @@ function peerRanks(p) {
 
 function nearestPeers(list, sector) {
   if (!list || !list.length) return "";
-  return `<div class="card">
+  return `<div class="card" id="sec-nearest">
     <div class="card-head">
       <h2>${esc(t("co.nearest", "The companies closest to it in size"))}</h2>
       <p class="sub">${esc(t("co.nearest.sub",

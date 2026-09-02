@@ -515,3 +515,53 @@ stroke-width='2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/>\
 .picker-tag.fund{background:#fff3e0;color:#b7791f}
 .picker-empty{padding:14px 13px;font-size:13.5px;color:var(--ink-3);line-height:1.5}
 .picker-host{width:100%}
+
+/* ---------------- company page tabs ----------------
+
+   The company page had grown to eleven stacked cards, so the valuation sat
+   four screens below the price and most readers never learned it was there.
+   Tabs put each question on its own surface without hiding anything: every
+   panel is in the document from the start, so the browser's find-in-page and
+   a crawler both still see all of it. */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:22px 0 0;
+  overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+  padding:11px 15px;font-size:14px;font-weight:500;color:var(--ink-3);
+  cursor:pointer;font-family:inherit;white-space:nowrap;transition:.12s}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.tab .n{display:inline-block;margin-inline-start:6px;font-size:11px;
+  color:var(--ink-3);font-weight:500}
+.tabpanel[hidden]{display:none}
+.tabpanel{padding-top:4px}
+
+/* ---------------- risk and status colour ----------------
+
+   One vocabulary for "how should I feel about this number", used everywhere
+   so a colour means the same thing on every page. Deliberately not red/green
+   for value judgements -- green does not mean buy. These say low/medium/high
+   on a measured scale, and each one carries its own words as well, because
+   colour alone excludes anyone who cannot distinguish these hues. */
+:root{
+  --risk-low:#0a7350; --risk-low-bg:#e6f7ee;
+  --risk-mid:#8a6417; --risk-mid-bg:#fdf5e6;
+  --risk-high:#b03024; --risk-high-bg:#fdecea;
+  --risk-none:#5a6778; --risk-none-bg:#eef1f4;
+}
+.rk{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;
+  border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.rk .dot{width:7px;height:7px;border-radius:50%;background:currentColor;
+  flex-shrink:0}
+.rk-low{background:var(--risk-low-bg);color:var(--risk-low)}
+.rk-mid{background:var(--risk-mid-bg);color:var(--risk-mid)}
+.rk-high{background:var(--risk-high-bg);color:var(--risk-high)}
+.rk-none{background:var(--risk-none-bg);color:var(--risk-none)}
+
+/* A measured value's place on a scale, drawn rather than described. */
+.scale{position:relative;height:6px;border-radius:3px;margin:7px 0 4px;
+  background:linear-gradient(90deg,var(--risk-low-bg),var(--risk-mid-bg),var(--risk-high-bg))}
+.scale .mark{position:absolute;top:-3px;width:3px;height:12px;border-radius:2px;
+  background:var(--ink);transform:translateX(-1px)}
+.scale-lbl{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--ink-3)}
