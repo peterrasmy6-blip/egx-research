@@ -225,6 +225,20 @@ def export_all(verbose: bool = True) -> dict:
     purge_phantom_dates(db, verbose=False)
     newest = latest_session(db) or db.scalar(select(func.max(Price.d)))
     last_full_session = newest
+    # How many companies are currently showing a second-source quote rather
+    # than a close from the primary source. Reported so the sources page can
+    # say what is actually being leaned on today, instead of describing a
+    # fallback that may or may not be carrying the site.
+    from app.ingest.quotes_sa import SOURCE_NAME as _SA, SOURCE_NAME_INTRADAY as _SAI
+    _sa_latest = (
+        select(Price.security_id, func.max(Price.d).label("d"))
+        .group_by(Price.security_id).subquery())
+    second_source_prices = db.scalar(
+        select(func.count()).select_from(Price)
+        .join(_sa_latest, (Price.security_id == _sa_latest.c.security_id)
+              & (Price.d == _sa_latest.c.d))
+        .where(Price.source.in_((_SA, _SAI)))) or 0
+
     quality = dict(db.execute(select(Security.data_quality, func.count(Security.id))
                               .group_by(Security.data_quality)).all())
     built = date.today()
@@ -305,6 +319,7 @@ def export_all(verbose: bool = True) -> dict:
             if db.scalar(select(func.max(Price.d))) else None),
         "data_quality_breakdown": quality,
         "built_on": built.isoformat(),
+        "second_source_prices": second_source_prices,
         "sources": ["Yahoo Finance (prices, dividends, financial statements)",
                     "stockanalysis.com (EGX listed-company index)"],
         "disclaimer": DISCLAIMER,
@@ -409,15 +424,27 @@ def export_all(verbose: bool = True) -> dict:
         "sources": [
             {"name": "Yahoo Finance",
              "used_for": "Daily prices, dividends, annual financial statements",
-             "limits": "About ten years of history. Statements for %d of %d "
-                       "companies. Some corporate actions arrive unadjusted."
-                       % (equities_with_statements, confirmed)},
-            {"name": "stockanalysis.com", "used_for": "EGX ticker roster",
-             "limits": "Disagrees with our second roster."},
+             "limits": ("About ten years of history. Statements for %d of %d "
+                        "companies. Some corporate actions arrive unadjusted. "
+                        "It stopped publishing Egyptian closes altogether "
+                        "after 26 August 2026, which is why a second price "
+                        "source exists."
+                        % (equities_with_statements, confirmed))},
+            {"name": "stockanalysis.com",
+             "used_for": ("EGX ticker roster, and the current price for %d "
+                          "companies whenever the primary source falls behind"
+                          % second_source_prices),
+             "limits": ("Disagrees with our second roster. Its price is a "
+                        "quote, not an official close, and carries no volume "
+                        "-- so it is used for the figure at the top of a page "
+                        "and never for returns, charts or liquidity.")},
             {"name": "african-markets.com", "used_for": "Second ticker roster",
              "limits": "Carries tickers renamed or delisted years ago."},
             {"name": "egxbot.com", "used_for": "Fund names and current NAV",
-             "limits": "40 funds, and no NAV history at all."},
+             "limits": ("40 funds, and no NAV history at all. When it cannot "
+                        "be reached we fall back to the last roster we "
+                        "captured, and every fund then says which date its "
+                        "value is from.")},
             {"name": "World Bank", "used_for": "Egyptian consumer prices",
              "limits": "Annual only; values between years are interpolated."},
         ],
