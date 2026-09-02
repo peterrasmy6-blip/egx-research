@@ -25,6 +25,14 @@ from .fundamentals import statement_history
 from . import inflation
 
 
+# Below these a per-share ratio is a unit or currency fault, not a bargain.
+# Every sound company on this exchange sits between roughly 0.7 and 6 times
+# book value, and a price of less than a year's earnings does not occur
+# honestly at Egyptian rates.
+MIN_SANE_PB = 0.10
+MIN_SANE_PE = 1.0
+
+
 def _pct_change(a, b):
     if a is None or b is None or b == 0:
         return None
@@ -182,9 +190,20 @@ def compute_metrics(db, sec, cpi_points=None) -> dict:
         # under 1 is not a bargain -- it means the two figures are not in the
         # same money. Per-share measures are then withheld rather than
         # published as a spectacular discount.
+        # Either condition alone is enough.
+        #
+        # Requiring both missed the case where the mismatched company also
+        # made a loss: Copper for Commercial Investment showed a third of a
+        # pound of market value for every ten pounds of book equity, but its
+        # negative earnings meant there was no P/E to fail the second half of
+        # the test, so the impossible price-to-book was published. A second
+        # data source widens the ways this can happen -- a share count off by
+        # a factor, a figure filed in the wrong unit -- and the response to
+        # any of them is the same: withhold the per-share measures rather than
+        # present an implausible one as a discovery.
         pe_val, pb_val = out.get("pe"), out.get("pb")
-        suspect = (pb_val is not None and pe_val is not None
-                   and pb_val < 0.10 and pe_val < 1.0)
+        suspect = ((pb_val is not None and pb_val < MIN_SANE_PB)
+                   or (pe_val is not None and 0 < pe_val < MIN_SANE_PE))
         out["units_suspect"] = bool(suspect)
         if suspect:
             for k in ("pe", "pb", "ps", "eps", "book_value_per_share"):
