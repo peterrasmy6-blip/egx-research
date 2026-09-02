@@ -85,6 +85,38 @@ def market_is_open(when=None) -> bool:
     return SESSION_OPEN_HOUR <= hour < SESSION_CLOSE_HOUR
 
 
+def quote_trading_date(when=None):
+    """
+    The trading day a quote read at this moment actually belongs to.
+
+    The listing shows one number and what it means depends entirely on the
+    clock. After 14:30 Cairo it is today's close. During the session it is an
+    intraday price. But before 10:00 -- and all weekend -- it is still the
+    PREVIOUS session's close, and stamping that with today's date says the
+    exchange has closed a day it has not yet opened.
+
+    That is not only mislabelled, it is self-blocking: a price dated today is
+    withheld from publication until after the bell, so a run at one in the
+    morning would fetch yesterday's perfectly good close, file it under today,
+    and then refuse to publish it for another thirteen hours.
+    """
+    from datetime import timedelta
+    when = when or cairo_now()
+    hour = when.hour + when.minute / 60.0
+
+    # A trading day, and trading has at least begun: the figure is today's.
+    if when.weekday() in TRADING_WEEKDAYS and hour >= SESSION_OPEN_HOUR:
+        return when.date()
+
+    # Otherwise walk back to the most recent day the exchange actually traded.
+    d = when.date() - timedelta(days=1)
+    for _ in range(10):
+        if d.weekday() in TRADING_WEEKDAYS:
+            return d
+        d -= timedelta(days=1)
+    return when.date()
+
+
 def _session():
     return cr.Session(impersonate="chrome")
 
@@ -161,9 +193,13 @@ def sync_quotes_second_source(db, verbose: bool = True) -> dict:
         return {"available": False, "reason": str(e), "written": 0}
 
     now = cairo_now()
-    today = now.date()
+    # The day this price belongs to, which before the open is yesterday.
+    today = quote_trading_date(now)
     intraday = market_is_open(now)
     source = SOURCE_NAME_INTRADAY if intraday else SOURCE_NAME
+    if verbose and today != now.date():
+        print("  before the open; this is the close of %s, filed as such"
+              % today.isoformat())
     if verbose and intraday:
         print("  the exchange is open; these are intraday prices, not closes")
 
