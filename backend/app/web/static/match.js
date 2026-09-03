@@ -35,12 +35,27 @@ const MATCH_GOALS = [
   {
     id: "income",
     label: "Regular income",
-    blurb: "Companies that pay a meaningful dividend and have kept paying it.",
+    blurb: "Pays a meaningful dividend, and has kept paying it.",
     tests: [
       {field: "dividend_yield_pct", op: ">=", value: 4,
        says: "pays at least 4% a year in cash"},
-      {field: "payout_ratio_pct", op: "<=", value: 90, optional: true,
-       says: "pays out no more than 90% of its profit, so the dividend is covered"},
+      {field: "dividend_consecutive", op: ">=", value: 3,
+       says: "has paid in each of the last three years at least"},
+      {field: "dividend_still_paying", op: "is", value: true,
+       says: "is still paying, not a record that stopped years ago"},
+    ],
+  },
+  {
+    // Separate from income on purpose. A yield rises when a price falls, so
+    // the highest yields belong to the payments the market least believes in
+    // -- and a reader who wants income should be able to ask for the payment
+    // to be covered without also being forced to accept a high yield.
+    id: "safedividend",
+    label: "A dividend covered by profit",
+    blurb: "The payment is smaller than the earnings behind it.",
+    tests: [
+      {field: "dividend_cover", op: ">=", value: 1.2,
+       says: "earns at least 1.2 times what it pays out"},
     ],
   },
   {
@@ -122,6 +137,7 @@ function matchPasses(row, test) {
   if (test.op === ">=") return v >= test.value;
   if (test.op === "<=") return v <= test.value;
   if (test.op === "in") return test.value.includes(v);
+  if (test.op === "is") return v === test.value;
   return null;
 }
 
@@ -192,11 +208,6 @@ async function runMatch() {
   for (const [ticker, m] of Object.entries(metrics)) {
     if (m.units_suspect) continue;
     const row = Object.assign({}, m, {ticker});
-    // Derived here: a payout ratio is the dividend divided by the earnings,
-    // and both of those are already published.
-    row.payout_ratio_pct = (m.dividend_yield_pct != null && m.pe != null && m.pe > 0)
-      ? m.dividend_yield_pct * m.pe : null;
-
     const results = tests.map(x => ({test: x, pass: matchPasses(row, x)}));
     const required = results.filter(r => !r.test.optional);
     // A missing measure is not a pass. A company we cannot check is excluded

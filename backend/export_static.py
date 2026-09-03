@@ -115,6 +115,23 @@ BENCHMARK_FIELDS = [
 MIN_SECTOR_FOR_BENCHMARK = 5
 
 
+
+def _dividend_fields(rec: dict | None) -> dict:
+    """The few parts of a dividend record a screen can filter on."""
+    if not rec or not rec.get("available"):
+        return {"dividend_years": None, "dividend_consecutive": None,
+                "dividend_cover": None, "dividend_still_paying": None,
+                "dividend_growth_pct": None}
+    cov = rec.get("cover") or {}
+    return {
+        "dividend_years": rec.get("years_paid"),
+        "dividend_consecutive": rec.get("consecutive_years"),
+        "dividend_cover": cov.get("times") if cov.get("available") else None,
+        "dividend_still_paying": rec.get("still_paying"),
+        "dividend_growth_pct": rec.get("growth_pct"),
+    }
+
+
 def _sector_benchmark(medians: dict, market: dict, sector: str | None) -> dict:
     """
     The middle of this company's sector, or of the exchange when the sector is
@@ -248,6 +265,22 @@ def export_all(verbose: bool = True) -> dict:
     } for s, m in listed])
 
     # ---- metrics (screener + comparison run entirely off this) -----------
+    # Dividend records for every company, built once. metrics.json is what the
+    # screener and the matcher read, and without these a screen for income can
+    # only ask about the yield -- which is the number that rises when a price
+    # falls, and so points at the dividends least likely to be repeated.
+    inflation_desc = inflation_mod.describe(db)
+    dividend_records = {}
+    for _s, _m in db.execute(
+            select(Security, SecurityMetrics)
+            .join(SecurityMetrics, SecurityMetrics.security_id == Security.id)
+            .where(Security.asset_type == "equity")).all():
+        _dps = ((_m.dividend_yield_pct / 100 * _m.price)
+                if (_m.dividend_yield_pct and _m.price) else None)
+        dividend_records[_s.ticker] = dividends_mod.describe(
+            db, _s.id, _dps, _m.eps,
+            (inflation_desc or {}).get("latest_annual_rate_pct"))
+
     sizes["metrics"] = _w(os.path.join(DATA_OUT, "metrics.json"), {
         s.ticker: {
             "name": s.name_en, "sector": s.sector,
@@ -257,6 +290,10 @@ def export_all(verbose: bool = True) -> dict:
             "pe": m.pe, "pb": m.pb, "ps": m.ps, "ev_ebitda": m.ev_ebitda,
             "eps": _round(m.eps, 4),
             "dividend_yield_pct": m.dividend_yield_pct,
+            # The record behind the yield, so a screen for income can ask for
+            # a dividend that has actually kept being paid. A high yield on a
+            # payment made once is the trap this exists to close.
+            **_dividend_fields(dividend_records.get(s.ticker)),
             "roe_pct": m.roe_pct, "roa_pct": m.roa_pct, "roic_pct": m.roic_pct,
             "net_margin_pct": m.net_margin_pct,
             "operating_margin_pct": m.operating_margin_pct,
@@ -473,7 +510,6 @@ def export_all(verbose: bool = True) -> dict:
     # a research site has to be able to answer about its most-read figure.
     # Read once and reused per company: the real-terms dividend
     # comparison needs it and it is the same number for everyone.
-    inflation_desc = inflation_mod.describe(db)
 
     price_sourcing = _price_sourcing(db)
 
