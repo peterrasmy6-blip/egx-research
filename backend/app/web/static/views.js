@@ -578,6 +578,8 @@ async function viewCompany(view, args) {
 
     ${d.asset_type === "fund" ? "" : pricePosition(d.price_position, d.price)}
 
+    ${d.asset_type === "fund" ? "" : sectorBenchmark(d.sector_benchmark, d)}
+
     <div class="card" id="sec-numbers">
       <div class="card-head"><h2>${esc(t("co.keynumbers", "Key numbers"))}</h2>
         <p class="sub">Calculated from this company's own filings${q.latest_statement ? ` (latest: ${esc(q.latest_statement)})` : ""}.</p></div>

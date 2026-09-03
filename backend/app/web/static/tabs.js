@@ -325,7 +325,7 @@ const COMPANY_TABS = [
   {id: "dividends", label: "Dividends",
    sections: ["sec-dividends"]},
   {id: "peers", label: "Peers",
-   sections: ["sec-peers", "sec-nearest"]},
+   sections: ["sec-benchmark", "sec-peers", "sec-nearest"]},
   {id: "tools", label: "Tools",
    sections: ["sec-tools"]},
 ];
@@ -531,3 +531,80 @@ function pricePosition(pp, price) {
 // `price` is already a function name in this file; a small alias keeps the
 // range card readable without shadowing it.
 function price_(v) { return price(v); }
+
+/* ---------------- this company against its sector ---------------- */
+
+/**
+ * Every measure set beside the middle of its sector.
+ *
+ * A ratio on its own tells a newcomer almost nothing. "Return on equity 26%"
+ * is excellent against Egyptian banks earning 12% and unremarkable against
+ * banks earning 30%, and which of those is true is precisely the fact someone
+ * new to the exchange does not have. The median supplies it in one line.
+ *
+ * The comparison is against the sector where the sector is large enough to
+ * mean something, and against the whole exchange where it is not -- and the
+ * card says which, because "cheaper than other Egyptian banks" and "cheaper
+ * than the exchange" are different claims.
+ */
+function sectorBenchmark(b, d) {
+  if (!b || !b.values || !Object.keys(b.values).length) return "";
+
+  const mine = {
+    pe: (d.valuation_ratios || {}).pe,
+    pb: (d.valuation_ratios || {}).pb,
+    roe_pct: (d.quality || {}).roe_pct,
+    net_margin_pct: (d.quality || {}).net_margin_pct,
+    dividend_yield_pct: (d.valuation_ratios || {}).dividend_yield_pct,
+    revenue_growth_pct: (d.quality || {}).revenue_growth_pct,
+    debt_to_equity: (d.valuation_ratios || {}).debt_to_equity,
+    volatility_pct: (d.risk || {}).volatility_pct,
+  };
+
+  const rows = b.fields.filter(f => b.values[f.key] != null
+                                    && mine[f.key] != null);
+  if (!rows.length) return "";
+
+  const fmt = (k, v) => (k === "pe" || k === "pb" || k === "debt_to_equity")
+    ? mult(v) : pctPlain(v, 1);
+
+  return `<div class="card" id="sec-benchmark">
+    <div class="card-head">
+      <h2>${esc(t("co.bench", "How it compares with"))} ${esc(b.label.toLowerCase())}</h2>
+      <p class="sub">${esc(t("co.bench.sub",
+        "Each measure beside the middle company of its group, so a ratio "
+        + "arrives with something to be judged against."))}
+        ${count(b.companies)} ${b.basis === "sector"
+          ? "companies in this sector" : "companies on the exchange"}.</p></div>
+
+    <div class="table-scroll"><table class="tbl">
+      <thead><tr>
+        <th style="text-align:left">Measure</th>
+        <th>This company</th>
+        <th>${esc(b.basis === "sector" ? "Sector middle" : "Exchange middle")}</th>
+        <th style="text-align:left">Difference</th>
+      </tr></thead>
+      <tbody>${rows.map(f => {
+        const a = mine[f.key], m = b.values[f.key];
+        const better = f.higher_better ? a > m : a < m;
+        const same = Math.abs(a / (m || 1) - 1) < 0.05;
+        const tone = same ? "rk-none" : better ? "rk-low" : "rk-mid";
+        const word = same ? "about the same"
+          : (better ? "better than" : "worse than") + " the middle";
+        return `<tr>
+          <td style="text-align:left">${esc(f.label)}</td>
+          <td style="font-weight:600">${fmt(f.key, a)}</td>
+          <td class="muted">${fmt(f.key, m)}</td>
+          <td style="text-align:left"><span class="rk ${tone}">
+            <span class="dot"></span>${esc(word)}</span></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+
+    <p class="disclaim">${esc(t("co.bench.note",
+      "Better and worse here describe the direction each measure is "
+      + "conventionally read in, not whether the company is a better "
+      + "investment. A low price-to-earnings is cheaper, and cheap is "
+      + "sometimes cheap for a reason."))}</p>
+  </div>`;
+}

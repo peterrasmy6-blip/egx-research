@@ -95,6 +95,53 @@ def _clean_output() -> None:
 
 # --------------------------------------------------------------------------
 
+
+# The measures worth setting against a sector, and which direction is
+# conventionally better. `higher_better` only phrases the sentence; nothing
+# here is scored.
+BENCHMARK_FIELDS = [
+    ("pe", "Price / earnings", False),
+    ("pb", "Price / book", False),
+    ("roe_pct", "Return on equity", True),
+    ("net_margin_pct", "Net margin", True),
+    ("dividend_yield_pct", "Dividend yield", True),
+    ("revenue_growth_pct", "Revenue growth", True),
+    ("debt_to_equity", "Debt / equity", False),
+    ("volatility_pct", "Volatility", False),
+]
+
+# Below this a sector median is three companies pretending to be a benchmark,
+# and the market-wide figure is the more honest comparison.
+MIN_SECTOR_FOR_BENCHMARK = 5
+
+
+def _sector_benchmark(medians: dict, market: dict, sector: str | None) -> dict:
+    """
+    The middle of this company's sector, or of the exchange when the sector is
+    too small to mean anything.
+
+    Which of the two was used is returned rather than assumed, because
+    "cheaper than other Egyptian banks" and "cheaper than the exchange" are
+    different claims and a page that blurs them is quietly overstating.
+    """
+    row = medians.get(sector or "", {})
+    n = row.get("_n", 0)
+    if sector and n >= MIN_SECTOR_FOR_BENCHMARK:
+        basis, label, count = "sector", sector, n
+    else:
+        row, basis = market, "market"
+        label, count = "the exchange", market.get("_n", 0)
+    return {
+        "basis": basis,
+        "label": label,
+        "companies": count,
+        "values": {k: row.get(k) for k, _lbl, _hb in BENCHMARK_FIELDS
+                   if row.get(k) is not None},
+        "fields": [{"key": k, "label": lbl, "higher_better": hb}
+                   for k, lbl, hb in BENCHMARK_FIELDS],
+    }
+
+
 def _price_sourcing(db) -> dict:
     """
     Which source supplied each company's newest price, counted from the table.
@@ -702,6 +749,11 @@ def export_all(verbose: bool = True) -> dict:
                 if (m and m.dividend_yield_pct and m.price) else None,
                 m.eps if m else None,
                 (inflation_desc or {}).get("latest_annual_rate_pct")),
+            # The sector's own middle, so a ratio arrives with the context a
+            # newcomer does not have: 26% return on equity reads as excellent
+            # or ordinary depending entirely on what Egyptian banks earn.
+            "sector_benchmark": _sector_benchmark(medians, market_medians,
+                                                  s.sector),
             "price_position": dividends_mod.price_position(
                 m.price if m else None,
                 m.low_52w if m else None,

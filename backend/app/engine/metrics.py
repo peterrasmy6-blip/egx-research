@@ -272,30 +272,48 @@ def refresh_metrics(db, verbose: bool = True) -> int:
     return n
 
 
+# The measures a sector benchmark is worth having for, and the range outside
+# which a value is a data fault rather than an unusual company. A single
+# mis-parsed figure can drag a median of five companies a long way, so the
+# guards matter more here than the extra measures do.
+MEDIAN_FIELDS = {
+    "pe": (0, 100), "pb": (0, 20), "ps": (0, 50),
+    "roe_pct": (-100, 150), "net_margin_pct": (-200, 100),
+    "dividend_yield_pct": (0, 40), "revenue_growth_pct": (-90, 300),
+    "debt_to_equity": (0, 20), "volatility_pct": (0, 200),
+}
+
+
 def sector_medians(db) -> dict:
     """
-    Median valuation multiples per sector.
+    Median measures per sector, used as a benchmark and shown on every page.
 
-    Used as the benchmark in relative valuation. Egyptian equities trade at
-    multiples far below developed markets, so importing a foreign benchmark
-    would make almost every EGX company look cheap.
+    Egyptian equities trade far below developed-market multiples, so importing
+    a foreign benchmark would make almost every company here look cheap. The
+    comparison that means something is against the companies a reader could
+    actually buy instead.
+
+    Widened beyond the three valuation multiples because a ratio alone tells a
+    reader very little: 26% return on equity reads as excellent or ordinary
+    depending entirely on whether Egyptian banks earn 12% or 30%, and that is
+    exactly the fact a newcomer does not have.
     """
+    cols = list(MEDIAN_FIELDS)
     rows = db.execute(
-        select(Security.sector, SecurityMetrics.pe, SecurityMetrics.pb,
-               SecurityMetrics.ps)
+        select(Security.sector,
+               *[getattr(SecurityMetrics, c) for c in cols])
         .join(SecurityMetrics, SecurityMetrics.security_id == Security.id)
         .where(Security.sector.isnot(None))).all()
 
     buckets: dict[str, dict[str, list]] = {}
-    for sector, pe, pb, ps in rows:
-        b = buckets.setdefault(sector, {"pe": [], "pb": [], "ps": []})
-        # Discard implausible multiples rather than let them drag the median.
-        if pe and 0 < pe < 100:
-            b["pe"].append(pe)
-        if pb and 0 < pb < 20:
-            b["pb"].append(pb)
-        if ps and 0 < ps < 50:
-            b["ps"].append(ps)
+    for row in rows:
+        sector, values = row[0], row[1:]
+        b = buckets.setdefault(sector, {c: [] for c in cols})
+        for name, v in zip(cols, values):
+            lo, hi = MEDIAN_FIELDS[name]
+            # Discard implausible values rather than let them drag the median.
+            if v is not None and lo < v < hi:
+                b[name].append(v)
 
     def med(xs):
         xs = sorted(xs)
@@ -310,9 +328,16 @@ def sector_medians(db) -> dict:
     # own. Without it, a company in a sector of one or two -- Telecom Egypt, for
     # instance -- loses every multiple-based method and is left with only the
     # models that depend on long-run assumptions, which are the least stable.
-    everything: dict[str, list] = {"pe": [], "pb": [], "ps": []}
+    everything: dict[str, list] = {c: [] for c in cols}
     for b in buckets.values():
         for k in everything:
             everything[k].extend(b[k])
     out["__market__"] = {k: med(v) for k, v in everything.items()}
+
+    # How many companies stand behind each sector's numbers, so a page can
+    # decline to draw a comparison from three of them.
+    for sector, b in buckets.items():
+        out[sector]["_n"] = max((len(v) for v in b.values()), default=0)
+    out["__market__"]["_n"] = max((len(v) for v in everything.values()),
+                                  default=0)
     return out
