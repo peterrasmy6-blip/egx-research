@@ -321,7 +321,10 @@ class SecurityMetrics(Base):
 # can be current while everything measured from history still stops where the
 # history stops.
 NON_TRADED_SOURCES = ("yahoo-isin-quote", "egx-research-nav",
-                      "stockanalysis-quote", "stockanalysis-intraday")
+                      "stockanalysis-quote", "stockanalysis-intraday",
+                      "stockanalysis-quote-intraday",
+                      "african-markets-quote",
+                      "african-markets-quote-intraday")
 
 
 class MacroSeries(Base):

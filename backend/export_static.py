@@ -93,6 +93,37 @@ def _clean_output() -> None:
 
 
 # --------------------------------------------------------------------------
+
+def _price_sourcing(db) -> dict:
+    """
+    Which source supplied each company's newest price, counted from the table.
+
+    Read back from what was actually stored rather than from what the fetch
+    reported, so this describes the site as published rather than the run that
+    built it.
+    """
+    from sqlalchemy import select, func
+    latest = (select(Price.security_id, func.max(Price.d).label("d"))
+              .group_by(Price.security_id).subquery())
+    rows = db.execute(
+        select(Price.source, func.count())
+        .join(latest, (Price.security_id == latest.c.security_id)
+              & (Price.d == latest.c.d))
+        .group_by(Price.source)).all()
+    by_source = {src: n for src, n in rows}
+    quotes = {k: v for k, v in by_source.items() if "quote" in k or "intraday" in k}
+    return {
+        "by_source": by_source,
+        "on_a_quote": sum(quotes.values()),
+        "on_a_close": sum(v for k, v in by_source.items() if k not in quotes),
+        "note": ("Prices come from a chain of sources, tried in order. Where "
+                 "two of them carry the same company their prices are "
+                 "compared, and a company they disagree about by more than 3% "
+                 "has its price withheld rather than published from one "
+                 "unverifiable figure."),
+    }
+
+
 def export_all(verbose: bool = True) -> dict:
     db = SessionLocal()
     _clean_output()
@@ -389,7 +420,13 @@ def export_all(verbose: bool = True) -> dict:
     from app.ingest import crosscheck as _cc
     cross = _cc.load()
 
+    # How today's prices were sourced, and how many a second source agreed
+    # with. Published because "where did this number come from" is a question
+    # a research site has to be able to answer about its most-read figure.
+    price_sourcing = _price_sourcing(db)
+
     sizes["quality"] = _w(os.path.join(DATA_OUT, "quality.json"), {
+        "price_sourcing": price_sourcing,
         "built_on": built.isoformat(),
         "universe": {
             "companies": confirmed,
@@ -438,8 +475,11 @@ def export_all(verbose: bool = True) -> dict:
                         "quote, not an official close, and carries no volume "
                         "-- so it is used for the figure at the top of a page "
                         "and never for returns, charts or liquidity.")},
-            {"name": "african-markets.com", "used_for": "Second ticker roster",
-             "limits": "Carries tickers renamed or delisted years ago."},
+            {"name": "african-markets.com",
+             "used_for": ("Second ticker roster, a third price source, and the "
+                          "cross-check that confirms the other two"),
+             "limits": ("Carries tickers renamed or delisted years ago. Its "
+                        "price is a quote rather than an official close.")},
             {"name": "egxbot.com", "used_for": "Fund names and current NAV",
              "limits": ("40 funds, and no NAV history at all. When it cannot "
                         "be reached we fall back to the last roster we "

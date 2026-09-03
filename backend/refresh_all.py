@@ -170,12 +170,12 @@ def main(mode: str = "full") -> None:
     # behind; it writes no volume and creates no session, so nothing measured
     # from history is touched by it.
     print("=== SECOND-SOURCE PRICES ===", flush=True)
-    from app.ingest.quotes_sa import sync_quotes_second_source
+    from app.ingest.quote_chain import sync_chain_quotes
     _q_db = SessionLocal()
     try:
-        sync_quotes_second_source(_q_db, verbose=True)
+        sync_chain_quotes(_q_db, verbose=True)
     except Exception as _e:                                     # noqa: BLE001
-        print("  second source failed: %s" % str(_e)[:120], flush=True)
+        print("  price chain failed: %s" % str(_e)[:120], flush=True)
     finally:
         _q_db.close()
 
