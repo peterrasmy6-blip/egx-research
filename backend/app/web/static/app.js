@@ -131,6 +131,7 @@ function render() {
     "/": viewHome,
     "/markets": viewMarkets,
     "/stock": viewCompany,
+    "/match": viewMatch,
     "/screener": viewScreener,
     "/compare": viewCompare,
     "/scenario": viewScenario,

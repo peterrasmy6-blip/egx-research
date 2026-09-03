@@ -339,7 +339,9 @@ def dcf_fcff(hist, shares, net_debt, assumptions, beta=1.0,
 # ---------------------------------------------------------------------------
 # Method 2 - Residual income (banks and financial institutions)
 # ---------------------------------------------------------------------------
-def residual_income(hist, shares, assumptions, beta=1.0) -> dict | None:
+def residual_income(hist, shares, assumptions, beta=1.0,
+                    growth_override=None,
+                    roe_override=None) -> dict | None:
     """
     Value = book equity + present value of profits above the cost of equity.
 
@@ -353,12 +355,13 @@ def residual_income(hist, shares, assumptions, beta=1.0) -> dict | None:
         return None
 
     ke = cost_of_equity(assumptions, beta)
-    roe = ni / equity
+    roe = (ni / equity) if roe_override is None else roe_override
     if roe <= 0:
         return None
 
-    g_book = _bounded_growth(historical_growth(hist, "total_equity"),
-                             terminal_growth_for(assumptions), 0.0, 0.35)
+    g_book = (growth_override if growth_override is not None
+              else _bounded_growth(historical_growth(hist, "total_equity"),
+                                   terminal_growth_for(assumptions), 0.0, 0.35))
 
     out = {}
     for case, roe_mult, fade in (("bear", 0.75, 0.75), ("base", 1.0, 0.85),
@@ -641,6 +644,13 @@ def value_security(db, sec, price: float, hist: list[dict],
     wanted = choose_methods(sec.sector, hist, bool(dps_ttm))
     results, skipped = [], []
 
+    # The same model read backwards: what growth would justify today's price?
+    # Computed from whichever method actually suits this company, so a bank is
+    # asked about its book equity and a manufacturer about its revenue.
+    implied = implied_growth(
+        hist, shares, net_debt, a, price,
+        "bank" if "residual_income" in wanted else "operating", beta)
+
     for m in wanted:
         r = None
         if m == "dcf":
@@ -722,6 +732,7 @@ def value_security(db, sec, price: float, hist: list[dict],
         "methods": results,
         "methods_skipped": skipped,
         "rationale": valuation_rationale(sec.sector),
+        "implied": implied,
         "rate_note": RATE_SOURCE_NOTE,
         "assumptions": a,
         "disclaimer": (
@@ -905,3 +916,172 @@ def _classify(upside, confidence, market_upside: float | None = None) -> tuple[s
     return ("Screens as expensive",
             "The model values this company well below the typical company on "
             "the exchange, relative to its price." + ref)
+
+
+# ---------------------------------------------------------------------------
+# What would have to be true
+# ---------------------------------------------------------------------------
+#
+# A fair value invites one question and answers a different one. It says "this
+# is worth 90" to a reader looking at 139, and the honest reply is that the
+# model is built on assumptions that could be wrong. Which leaves nobody any
+# wiser, because the reader cannot see which assumption is load-bearing.
+#
+# Turning the model around answers the question actually being asked. Instead
+# of assuming a growth rate and producing a value, assume today's price is
+# right and solve for the growth rate that would justify it. That converts an
+# argument about a model into a question about a business: the market is
+# paying for 18% profit growth a year for eight years -- has this company ever
+# done that, and can it do it again?
+#
+# It is the same arithmetic read backwards, so it carries no extra assumption
+# of its own, and a reader who distrusts our fair value can still use it.
+
+IMPLIED_LOW, IMPLIED_HIGH = -0.30, 0.80
+IMPLIED_STEPS = 60
+
+
+def implied_growth(hist, shares, net_debt, assumptions, price, kind,
+                   beta: float = 1.0) -> dict | None:
+    """
+    The growth rate at which the model would output exactly today's price.
+
+    Found by bisection rather than algebra: the model is a loop with fading
+    margins and a bounded exit multiple, not a closed form, and solving the
+    real thing is worth more than solving a simplified version of it.
+    """
+    if not price or price <= 0 or not hist:
+        return None
+
+    # Which assumption depends on the business, because the lever that moves
+    # the value is not the same one in both cases. A residual-income value is
+    # driven by the spread between return on equity and the cost of equity, so
+    # growing a bank's balance sheet faster at an unchanged return barely
+    # moves it. The first version of this asked banks for 80% book growth and
+    # still could not reach the price -- a question about the wrong quantity
+    # rather than a fact about the bank.
+    def value_at(x):
+        if kind == "bank":
+            r = residual_income(hist, shares, assumptions, beta,
+                                roe_override=x)
+        else:
+            r = dcf_fcff(hist, shares, net_debt, assumptions, beta,
+                         growth_override=x)
+        if not r:
+            return None
+        return r["per_share"].get("base")
+
+    lo, hi = (0.01, 0.70) if kind == "bank" else (IMPLIED_LOW, IMPLIED_HIGH)
+
+    # Walk the ends inward until both produce a number.
+    #
+    # The models decline rather than return a negative value: a bank earning
+    # less than its cost of equity has no residual income worth discounting,
+    # and a company with negative free cash flow has no discounted cash flow.
+    # So the extreme end of the bracket often yields nothing, and treating
+    # that as "cannot be solved" silently dropped the answer for CIB, Juhayna
+    # and Elsewedy alike. The bracket is narrowed instead, and whatever is
+    # still solvable is reported.
+    step = (hi - lo) / 24.0
+    v_lo = value_at(lo)
+    while v_lo is None and lo < hi:
+        lo += step
+        v_lo = value_at(lo)
+    v_hi = value_at(hi)
+    while v_hi is None and hi > lo:
+        hi -= step
+        v_hi = value_at(hi)
+    if v_lo is None or v_hi is None or hi <= lo:
+        return None
+
+    # Outside the bracket the answer is not a number but a statement, and
+    # saying "more than 80% a year, every year, for eight years" is far more
+    # use to a reader than a spuriously precise 94.3%.
+    what = "return on equity" if kind == "bank" else "profit growth"
+    if v_hi < price:
+        return {"available": False, "beyond": "high",
+                "note": ("Even at %d%% %s the model does not reach today's "
+                         "price. What the market is paying for here is not "
+                         "something this model can measure."
+                         % (round(hi * 100), what))}
+    if v_lo > price:
+        return {"available": False, "beyond": "low",
+                "note": ("The model clears today's price even at %d%% %s. The "
+                         "market is pricing in something this model does not "
+                         "see, which may be a risk it cannot measure rather "
+                         "than a bargain." % (round(lo * 100), what))}
+
+    for _ in range(IMPLIED_STEPS):
+        mid = (lo + hi) / 2
+        v = value_at(mid)
+        if v is None:
+            return None
+        if v < price:
+            lo = mid
+        else:
+            hi = mid
+    implied = (lo + hi) / 2
+
+    if kind == "bank":
+        latest = hist[0]["values"]
+        eq, ni = latest.get("total_equity"), latest.get("net_income")
+        actual = (ni / eq) if (eq and ni and eq > 0) else None
+    else:
+        actual = historical_growth(hist, "revenue")
+    actual_ni = historical_growth(hist, "net_income")
+
+    verdict, note = _implied_verdict(implied, actual, actual_ni, kind)
+    return {
+        "available": True,
+        "measure": "return on equity" if kind == "bank" else "profit growth",
+        "implied_growth_pct": round(implied * 100, 1),
+        "years": 8 if kind == "bank" else 5,
+        "basis": "return on equity" if kind == "bank" else "revenue",
+        "actual_growth_pct": None if actual is None else round(actual * 100, 1),
+        "actual_earnings_growth_pct": (
+            None if actual_ni is None else round(actual_ni * 100, 1)),
+        "verdict": verdict,
+        "note": note,
+    }
+
+
+def _implied_verdict(implied, actual, actual_ni, kind):
+    """
+    Set the required rate against what the company has actually managed.
+
+    Deliberately not a recommendation. It reports the size of the gap between
+    what the price requires and what the record shows, and leaves the reader
+    to decide whether this company is the exception.
+    """
+    basis = "revenue"
+    pct = "%.1f%%" % (implied * 100)
+    if actual is None:
+        asks = (("a sustained return on equity of " + pct) if kind == "bank"
+                else (pct + " growth a year"))
+        return "unknown", (
+            "Today's price implies " + asks + ". We do not hold enough "
+            "history to say whether this company has ever managed that.")
+
+    gap = implied - actual
+    hist_txt = (("It currently earns %.1f%% on equity" % (actual * 100))
+                if kind == "bank" else
+                ("It has grown %s at %.1f%% a year over the periods we hold"
+                 % (basis, actual * 100)))
+    if actual_ni is not None:
+        hist_txt += ", with profits growing %.1f%% a year" % (actual_ni * 100)
+
+    asks = (("a sustained return on equity of " + pct) if kind == "bank"
+            else (pct + " growth a year"))
+    if gap > 0.10:
+        return "demanding", (
+            "Today's price implies " + asks + ". " + hist_txt + ". To justify "
+            "the price it has to do considerably better than it has been.")
+    if gap < -0.10:
+        return "modest", (
+            "Today's price implies " + asks + ". " + hist_txt + ". The price "
+            "asks for less than the record has delivered, which is either an "
+            "opportunity or a sign the market expects the record not to "
+            "continue.")
+    return "in line", (
+        "Today's price implies " + asks + ". " + hist_txt + ". The price is "
+        "broadly asking for a continuation of what has already happened.")

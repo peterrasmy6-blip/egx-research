@@ -305,6 +305,17 @@ STATIC_ROUTES = {
         "<p>Every ordinary listed company on the EGX, with prices, returns and "
         "data-quality labels. Companies with incomplete data are kept in the "
         "list and marked, not hidden.</p>"),
+    "/match": (
+        "Find Egyptian shares that match what you want",
+        "Choose what matters to you — income, steadiness, easy selling, "
+        "low borrowing — and see every company on the Egyptian Exchange "
+        "that clears those tests, with the workings shown. Not advice.",
+        "<h1>Find companies that match what you are looking for</h1>"
+        "<p>Pick what matters and every choice becomes a test over published "
+        "figures. This asks about the shares, never about you: which "
+        "companies pay above 4% has a checkable answer, while which companies "
+        "suit you is a question about your life that a web page cannot "
+        "know.</p>"),
     "/screener": (
         "Egyptian stock screener — filter the whole EGX",
         "Filter Egyptian Exchange companies by P/E, dividend yield, return on "

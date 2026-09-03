@@ -329,3 +329,75 @@ const COMPANY_TABS = [
   {id: "tools", label: "Tools",
    sections: ["sec-tools"]},
 ];
+
+
+/* ---------------- what would have to be true ---------------- */
+
+/**
+ * The model, read backwards.
+ *
+ * A fair value invites one question and answers a different one. It tells a
+ * reader looking at 139 that the thing is worth 90, and the honest reply --
+ * that the model rests on assumptions which could be wrong -- leaves nobody
+ * any wiser, because the reader cannot see which assumption is carrying the
+ * weight.
+ *
+ * Turning it around answers the question actually being asked. Instead of
+ * assuming a rate and producing a value, assume today's price is right and
+ * solve for the rate that would justify it. That converts an argument about a
+ * model into a question about a business: the market is paying for a 52%
+ * return on equity, and this bank earns 27% -- has it ever done better, and
+ * what would have to change?
+ *
+ * The reader is left to answer that. It is the one part of a valuation where
+ * someone who knows the company knows more than the model does.
+ */
+function impliedBlock(im) {
+  if (!im) return "";
+
+  if (!im.available) {
+    return `<div class="callout">
+      <strong>${esc(t("co.implied.title", "What would have to be true?"))}</strong>
+      ${esc(im.note || "")}</div>`;
+  }
+
+  const tone = {demanding: "rk-high", "in line": "rk-mid",
+                modest: "rk-low"}[im.verdict] || "rk-none";
+  const word = {demanding: "Demands more than the record",
+                "in line": "In line with the record",
+                modest: "Asks less than the record",
+                unknown: "No record to compare"}[im.verdict] || im.verdict;
+
+  return `<div class="card" style="margin-top:18px;box-shadow:none;
+       border:1px solid var(--line-2);background:var(--surface-2)">
+    <div class="card-head">
+      <h2 style="font-size:16px">${esc(t("co.implied.title",
+        "What would have to be true?"))}</h2>
+      <p class="sub">${esc(t("co.implied.sub",
+        "The same model read backwards: take today's price as correct, and "
+        + "solve for the assumption that would justify it."))}</p></div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="k">${esc(t("co.implied.needs", "The price implies"))}</div>
+        <div class="v">${pctPlain(im.implied_growth_pct, 1)}</div>
+        <div class="note">${esc(im.measure)}, sustained for
+          ${count(im.years)} years</div></div>
+      <div class="stat">
+        <div class="k">${esc(t("co.implied.actual", "It has managed"))}</div>
+        <div class="v">${im.actual_growth_pct == null ? "—"
+          : pctPlain(im.actual_growth_pct, 1)}</div>
+        <div class="note">on the history we hold</div></div>
+      <div class="stat">
+        <div class="k">${esc(t("co.implied.gap", "The gap"))}</div>
+        <div class="v"><span class="rk ${tone}"><span class="dot"></span>${esc(word)}</span></div></div>
+    </div>
+
+    <p style="font-size:14px;color:var(--ink-2);line-height:1.65;margin:12px 0 0">
+      ${esc(im.note)}</p>
+    <p class="disclaim">${esc(t("co.implied.note",
+      "This is arithmetic on the price, not a forecast and not a view. It "
+      + "says what the market appears to be assuming; whether that assumption "
+      + "is reasonable is the part only you can judge."))}</p>
+  </div>`;
+}

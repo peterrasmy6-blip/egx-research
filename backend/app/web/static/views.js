@@ -949,6 +949,8 @@ async function loadValuation(ticker) {
         <span>${esc(v.classification_note)}</span>
       </div>
 
+      ${impliedBlock(v.implied)}
+
       <div class="callout info"><strong>Why these methods?</strong> ${esc(v.rationale)}</div>
 
       ${v.rate_note ? `<div class="callout"><strong>Why Egyptian shares can look
