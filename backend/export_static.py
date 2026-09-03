@@ -47,6 +47,7 @@ from app.engine import stress as stress_mod
 from app.engine import breadth as breadth_mod
 from app.engine import peers as peers_mod
 from app.engine import digest as digest_mod
+from app.engine import dividends as dividends_mod
 from app.engine import (analytics, fundamentals, valuation, metrics as metrics_mod,
                         composite as composite_mod)
 from app.api.education import GLOSSARY, LESSONS, QUESTIONNAIRE, PROFILES
@@ -423,6 +424,10 @@ def export_all(verbose: bool = True) -> dict:
     # How today's prices were sourced, and how many a second source agreed
     # with. Published because "where did this number come from" is a question
     # a research site has to be able to answer about its most-read figure.
+    # Read once and reused per company: the real-terms dividend
+    # comparison needs it and it is the same number for everyone.
+    inflation_desc = inflation_mod.describe(db)
+
     price_sourcing = _price_sourcing(db)
 
     sizes["quality"] = _w(os.path.join(DATA_OUT, "quality.json"), {
@@ -687,6 +692,20 @@ def export_all(verbose: bool = True) -> dict:
             },
             "dividends": [{"ex_date": d.ex_date.isoformat(),
                            "amount": round(d.amount_per_share, 6)} for d in divs],
+            # A yield is last year's payment over today's price, so it rises
+            # when a price falls -- the highest yields belong to the dividends
+            # the market least believes in. The record behind the yield is the
+            # part worth reading.
+            "dividend_record": dividends_mod.describe(
+                db, s.id,
+                (m.dividend_yield_pct / 100 * m.price)
+                if (m and m.dividend_yield_pct and m.price) else None,
+                m.eps if m else None,
+                (inflation_desc or {}).get("latest_annual_rate_pct")),
+            "price_position": dividends_mod.price_position(
+                m.price if m else None,
+                m.low_52w if m else None,
+                m.high_52w if m else None),
             "fundamentals": {"annual": hist_a, "quarterly": hist_q},
             # The same statements expressed as a share of revenue (or of total
             # assets on the balance sheet), so the shape of the business is

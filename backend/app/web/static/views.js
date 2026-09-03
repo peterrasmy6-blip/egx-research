@@ -576,6 +576,8 @@ async function viewCompany(view, args) {
 
     ${d.asset_type === "fund" ? "" : riskPanel(d)}
 
+    ${d.asset_type === "fund" ? "" : pricePosition(d.price_position, d.price)}
+
     <div class="card" id="sec-numbers">
       <div class="card-head"><h2>${esc(t("co.keynumbers", "Key numbers"))}</h2>
         <p class="sub">Calculated from this company's own filings${q.latest_statement ? ` (latest: ${esc(q.latest_statement)})` : ""}.</p></div>
@@ -641,6 +643,8 @@ async function viewCompany(view, args) {
     <div class="card" id="sec-dividends">
       <div class="card-head"><h2>Dividends</h2>
         <p class="sub">Cash paid per share, by ex-dividend date.</p></div>
+      ${dividendRecord(d.dividend_record)}
+      <h4 style="font-size:14px;margin:22px 0 8px">Every payment we hold</h4>
       <div id="div-body"><p class="muted">Loading…</p></div>
     </div>
 

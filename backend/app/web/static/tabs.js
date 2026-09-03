@@ -315,7 +315,7 @@ function groupIntoTabs(root, spec, group) {
  */
 const COMPANY_TABS = [
   {id: "overview", label: "Overview",
-   sections: ["sec-fund", "sec-risk", "sec-numbers"]},
+   sections: ["sec-fund", "sec-risk", "sec-range", "sec-numbers"]},
   {id: "valuation", label: "Valuation",
    sections: ["val-card"]},
   {id: "performance", label: "Performance",
@@ -401,3 +401,133 @@ function impliedBlock(im) {
       + "is reasonable is the part only you can judge."))}</p>
   </div>`;
 }
+
+
+/* ---------------- the dividend record ---------------- */
+
+/**
+ * What a dividend record says that a yield does not.
+ *
+ * A yield is last year's payment over today's price, so it rises when a price
+ * falls. The highest yields on any exchange belong to the payments the market
+ * least believes will be repeated, which means a reader shopping on yield
+ * alone is steered toward the dividends most likely to be cut.
+ *
+ * Consistency, cover and real growth are all measurable from records already
+ * held, and all three say more than the headline number.
+ */
+function dividendRecord(r) {
+  if (!r || !r.available) {
+    return `<p class="muted">${esc((r && r.reason)
+      || "We hold no record of this company paying a dividend.")}</p>`;
+  }
+
+  const cov = r.cover || {};
+  const covTone = {comfortable: "rk-low", adequate: "rk-low", thin: "rk-mid",
+                   uncovered: "rk-high"}[cov.band] || "rk-none";
+  const covWord = {comfortable: "Comfortably covered", adequate: "Covered",
+                   thin: "Barely covered",
+                   uncovered: "Not covered by profit"}[cov.band] || "Not measured";
+
+  const streakTone = r.consecutive_years >= 5 ? "rk-low"
+    : r.consecutive_years >= 3 ? "rk-mid" : "rk-none";
+
+  const realTone = r.real_growth_pct == null ? "rk-none"
+    : r.real_growth_pct >= 0 ? "rk-low" : "rk-high";
+
+  const bars = (r.annual || []).slice(-10);
+  const peak = Math.max(...bars.map(b => b.total), 0) || 1;
+
+  return `
+    <div class="stats">
+      <div class="stat"><div class="k">Years it has paid</div>
+        <div class="v">${count(r.years_paid)}</div>
+        <div class="note">since ${esc(String(r.first_paid).slice(0, 4))}</div></div>
+      <div class="stat"><div class="k">Unbroken run</div>
+        <div class="v"><span class="rk ${streakTone}"><span class="dot"></span>${
+          count(r.consecutive_years)} year${r.consecutive_years === 1 ? "" : "s"}</span></div>
+        <div class="note">${r.still_paying ? "most recent " + esc(r.last_paid)
+          : "last paid " + esc(r.last_paid) + " — nothing since"}</div></div>
+      <div class="stat"><div class="k">Covered by profit</div>
+        <div class="v"><span class="rk ${covTone}"><span class="dot"></span>${
+          cov.available ? mult(cov.times) : "—"}</span></div>
+        <div class="note">${esc(covWord)}</div></div>
+      <div class="stat"><div class="k">Growth of the payment</div>
+        <div class="v">${r.growth_pct == null ? "—" : pctPlain(r.growth_pct, 1)}</div>
+        <div class="note">a year over ${count(r.growth_years || 0)} years</div></div>
+      ${r.real_growth_pct != null ? `<div class="stat">
+        <div class="k">After inflation</div>
+        <div class="v"><span class="rk ${realTone}"><span class="dot"></span>${
+          pctPlain(r.real_growth_pct, 1)}</span></div>
+        <div class="note">what the payment actually buys</div></div>` : ""}
+    </div>
+
+    ${cov.available ? `<div class="callout${
+      cov.band === "uncovered" ? "" : " info"}">${esc(cov.note)}</div>` : ""}
+
+    ${r.real_note ? `<p style="font-size:14px;color:var(--ink-2);
+      line-height:1.65;margin:12px 0 0">${esc(r.real_note)}</p>` : ""}
+
+    ${(r.gaps || []).length ? `<div class="callout">
+      <strong>The run has been broken.</strong> No dividend was recorded ${
+        r.gaps.map(g => `between ${g.after} and ${g.resumed}`).join(", ")}.
+      A company that has stopped once can stop again.</div>` : ""}
+
+    ${bars.length >= 2 ? `<h4 style="font-size:14px;margin:20px 0 8px">
+      Paid each year, per share</h4>
+    <div class="divbars">
+      ${bars.map(b => `<div class="divbar" title="${b.year}: ${egp2(b.total)}">
+        <div class="db-fill" style="height:${Math.max(3, b.total / peak * 100)}%"></div>
+        <div class="db-yr">${String(b.year).slice(2)}</div>
+      </div>`).join("")}
+    </div>` : ""}
+
+    <p class="disclaim">A record of what has been paid, not a promise of what
+      will be. Cover and consistency are facts; whether this dividend survives
+      next year is a judgement about the business that no measurement here
+      can make.</p>`;
+}
+
+/* ---------------- where the price sits in its own year ---------------- */
+
+/**
+ * The 52-week range, with today's price marked on it.
+ *
+ * The most self-contained measure on the page: it compares a company only
+ * with itself, needing no peer group, no sector median and no model. It also
+ * carries no verdict, because it does not support one -- shares sit near
+ * their low both when they are cheap and when the business is failing.
+ */
+function pricePosition(pp, price) {
+  if (!pp || !pp.available) return "";
+  return `<div class="card" id="sec-range">
+    <div class="card-head"><h2>${esc(t("co.range", "Where the price sits in its own year"))}</h2>
+      <p class="sub">${esc(t("co.range.sub",
+        "Today against this company's own highest and lowest points of the past 12 months."))}</p></div>
+
+    <div class="rangebar">
+      <div class="rb-track"><div class="rb-mark" style="left:${pp.position_pct}%"></div></div>
+      <div class="rb-ends">
+        <span>${price_(pp.low)}<em>12-month low</em></span>
+        <span style="text-align:end">${price_(pp.high)}<em>12-month high</em></span>
+      </div>
+    </div>
+
+    <div class="stats" style="margin-top:14px">
+      <div class="stat"><div class="k">Position in the range</div>
+        <div class="v">${pctPlain(pp.position_pct, 0)}</div>
+        <div class="note">${esc(pp.where)}</div></div>
+      <div class="stat"><div class="k">Above its low</div>
+        <div class="v up">${pp.from_low_pct == null ? "—" : pct(pp.from_low_pct)}</div></div>
+      <div class="stat"><div class="k">Below its high</div>
+        <div class="v ${pp.from_high_pct < 0 ? "down" : ""}">${
+          pp.from_high_pct == null ? "—" : pct(pp.from_high_pct)}</div></div>
+    </div>
+
+    <p class="disclaim">${esc(pp.note)}</p>
+  </div>`;
+}
+
+// `price` is already a function name in this file; a small alias keeps the
+// range card readable without shadowing it.
+function price_(v) { return price(v); }
