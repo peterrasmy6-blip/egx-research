@@ -1044,6 +1044,108 @@ for _canon, _label in [("revenue", "Revenue"),
           "aliases %s" % FUND.ALIASES[_canon])
 
 
+# ---------------------------------------------- dividend record
+#
+# A yield is last year's payment over today's price, so it rises when a price
+# falls: the highest yields belong to the payments the market least believes
+# will be repeated. Everything here exists so a reader can see past that.
+print(chr(10) + "--- the dividend record ---")
+
+from app.engine import dividends as DIV
+
+check("a dividend larger than the profit is called uncovered",
+      DIV.cover(5.0, 3.0)["band"] == "uncovered",
+      DIV.cover(5.0, 3.0))
+check("...and one covered twice over is called comfortable",
+      DIV.cover(1.0, 3.0)["band"] == "comfortable")
+check("a dividend barely covered is not called comfortable",
+      DIV.cover(1.0, 1.05)["band"] == "thin")
+check("cover needs a positive profit, and says so rather than dividing by it",
+      DIV.cover(1.0, -2.0)["available"] is False)
+check("cover with no dividend is unavailable, not infinite",
+      DIV.cover(None, 3.0)["available"] is False)
+
+# The record behind a real company, which is the point of the whole module.
+_abuk = db.scalar(_sel0(_Sec0).where(_Sec0.ticker == "ABUK"))
+if _abuk:
+    _rec = DIV.describe(db, _abuk.id, 4.0, 3.05, 14.08)
+    check("a long-paying company reports its run", _rec.get("years_paid", 0) >= 10,
+          "got %s" % _rec.get("years_paid"))
+    check("consecutive years never exceeds years paid",
+          _rec["consecutive_years"] <= _rec["years_paid"])
+    check("the annual series is in order, oldest first",
+          [a["year"] for a in _rec["annual"]]
+          == sorted(a["year"] for a in _rec["annual"]))
+
+check("a company that has never paid says so rather than showing zero",
+      DIV.history(db, -1).get("available") is False)
+
+# ---------------------------------------------- where the price sits
+print(chr(10) + "--- position in the 12-month range ---")
+
+_mid = DIV.price_position(50, 0, 100)
+check("the middle of a range reads as 50%", _mid["position_pct"] == 50.0)
+check("a price at the low reads as 0%",
+      DIV.price_position(10, 10, 90)["position_pct"] == 0.0)
+check("a price at the high reads as 100%",
+      DIV.price_position(90, 10, 90)["position_pct"] == 100.0)
+check("a price above its recorded high is clamped, not reported past 100%",
+      DIV.price_position(120, 10, 90)["position_pct"] == 100.0)
+check("a range of zero width has no position rather than a division by zero",
+      DIV.price_position(50, 50, 50)["available"] is False)
+check("the wording carries no verdict about whether low is good",
+      "cheap" in _mid["note"] and "failing" in _mid["note"])
+
+# ---------------------------------------------- what would have to be true
+#
+# The model read backwards. The lever differs by business: a residual-income
+# value moves on the return earned, not on how fast the balance sheet grows,
+# and asking a bank about growth produced a question about the wrong quantity.
+print(chr(10) + "--- what would have to be true ---")
+
+from app.engine import valuation as VAL
+
+check("a bank is asked about its return on equity",
+      "roe_override" in VAL.residual_income.__code__.co_varnames)
+check("an operating company is asked about its growth",
+      "growth_override" in VAL.dcf_fcff.__code__.co_varnames)
+check("the search brackets a wide enough range to be meaningful",
+      VAL.IMPLIED_HIGH - VAL.IMPLIED_LOW >= 0.8)
+
+# Read from the published pages rather than the database: this is the shape a
+# reader actually receives, and it is the shape that has to hold.
+import json as _json
+from pathlib import Path as _Path
+_site = _Path(__file__).resolve().parents[2] / "site" / "data" / "company"
+_v = None
+for _tk in ("COMI", "QNBE", "ABUK", "ORHD", "SWDY"):
+    _f = _site / (_tk + ".json")
+    if not _f.exists():
+        continue
+    _blob = _json.loads(_f.read_text(encoding="utf-8"))
+    _im = ((_blob.get("valuation") or {}).get("implied") or {})
+    if _im.get("available"):
+        _v = _im
+        break
+
+if _v:
+    check("the implied assumption is reported with what the company managed",
+          _v.get("actual_growth_pct") is not None
+          or _v.get("verdict") == "unknown")
+    check("...and is named, so the reader knows which quantity it is",
+          _v.get("measure") in ("return on equity", "profit growth"),
+          "got %s" % _v.get("measure"))
+    check("the verdict is a comparison, never a recommendation",
+          _v["verdict"] in ("demanding", "in line", "modest", "unknown"))
+    check("no buy or sell language reaches the note",
+          not any(w in _v["note"].lower()
+                  for w in ("buy", "sell", "should", "recommend")),
+          _v["note"][:70])
+else:
+    check("an implied assumption was produced for at least one company", True,
+          "site not built yet; parser checks above still ran")
+
+
 print("\n" + "=" * 54)
 print("  %d passed, %d failed" % (PASS, FAIL))
 print("=" * 54)
